@@ -17,10 +17,13 @@
 </head>
 <body>
   <header class="topbar">
-    <a class="brand" href="#" aria-label="Study Pal home">
-      <span class="brand-mark" aria-hidden="true">S</span>
-      <span>Study Pal</span>
-    </a>
+    <div class="brand-group">
+      <button id="toggle-history" class="history-toggle" type="button" aria-label="Toggle conversations sidebar" aria-expanded="true">☰</button>
+      <a id="study-pal-home" class="brand" href="#" aria-label="Open a new map">
+        <span class="brand-mark" aria-hidden="true">S</span>
+        <span>Study Pal</span>
+      </a>
+    </div>
     <div class="top-actions">
       <button id="open-usage" class="usage-button" type="button" aria-haspopup="dialog" aria-label="Open API usage details">
         <span id="month-tokens">0</span> <span class="usage-caption">tokens</span>
@@ -28,7 +31,6 @@
       <button id="theme-toggle" class="theme-toggle" type="button" aria-label="Switch to dark theme" title="Switch theme">
         <span aria-hidden="true">☾</span>
       </button>
-      <button id="new-session" class="button button-ghost" type="button">New map</button>
       <button id="open-settings" class="button button-dark" type="button" aria-haspopup="dialog">
         <span class="status-dot" id="key-status" aria-hidden="true"></span>
         <span class="settings-label">Settings</span>
@@ -37,26 +39,39 @@
   </header>
 
   <main class="app-shell">
+    <aside class="history-panel" aria-label="Past conversations">
+      <div class="history-heading">
+        <div>
+          <span class="eyebrow">Your library</span>
+          <h2>Conversations</h2>
+        </div>
+      </div>
+      <button id="new-map-sidebar" class="new-map-sidebar" type="button"><span aria-hidden="true">＋</span> New map</button>
+      <nav id="history-list" class="history-list" aria-label="Saved conversations"></nav>
+      <p id="history-empty" class="history-empty" hidden>No saved conversations yet.</p>
+      <p class="history-storage"><span aria-hidden="true">●</span> Stored in this browser</p>
+    </aside>
+
     <section class="workspace" aria-label="Conversation">
       <div id="welcome" class="welcome">
         <div class="eyebrow">A thinking space that branches</div>
         <h1>Follow every<br><em>line of thought.</em></h1>
         <p>Ask a question, explore the answer, then branch from any earlier idea without losing your way.</p>
         <div class="starter-grid" aria-label="Example questions">
-          <button class="starter" data-prompt="Explain gradient descent visually and mathematically.">
-            <span class="starter-icon">↘</span>
-            <strong>Learn a concept</strong>
-            <small>Explain gradient descent visually</small>
+          <button class="starter" data-prompt="Explain and prove the Tower Law for finite field extensions K ⊆ F ⊆ L. Show how bases compose, then work through the example Q ⊆ Q(√2) ⊆ Q(√2, √3) and relate it to Galois theory.">
+            <span class="starter-icon">⊆</span>
+            <strong>Explain the Tower Law from Galois Theory</strong>
+            <small>Degrees of extensions in Galois theory</small>
           </button>
-          <button class="starter" data-prompt="Compare TCP and UDP with practical examples.">
-            <span class="starter-icon">⇄</span>
-            <strong>Compare ideas</strong>
-            <small>When should I use TCP or UDP?</small>
+          <button class="starter" data-prompt="Over an algebraically closed field k, explain and prove the affine algebraic set–radical ideal correspondence from Hilbert's Nullstellensatz, carefully showing how the algebra and geometry reverse inclusions.">
+            <span class="starter-icon">V</span>
+            <strong>Connect ideals and geometry</strong>
+            <small>Understand the Nullstellensatz correspondence</small>
           </button>
-          <button class="starter" data-prompt="Derive the quadratic formula step by step using LaTeX.">
-            <span class="starter-icon">∑</span>
-            <strong>Work through math</strong>
-            <small>Derive the quadratic formula</small>
+          <button class="starter" data-prompt="Let f: X → Y be a dominant morphism of irreducible algebraic varieties. Prove the fiber dimension theorem, explain why the generic fiber has dimension dim(X) − dim(Y), and give an example where special fibers have larger dimension.">
+            <span class="starter-icon">f</span>
+            <strong>Study fibers of algebraic varieties</strong>
+            <small>Generic and special fibers of varieties</small>
           </button>
         </div>
       </div>
@@ -69,13 +84,20 @@
           <button id="clear-branch" type="button" aria-label="Return to latest node">×</button>
         </div>
         <form id="composer" class="composer">
+          <div id="attachments" class="attachments" aria-label="PDFs in this map" hidden></div>
           <textarea id="prompt" rows="1" placeholder="Ask anything…" aria-label="Message" maxlength="30000"></textarea>
           <div class="composer-footer">
-            <span class="hint"><kbd>Enter</kbd> send · <kbd>Shift</kbd> + <kbd>Enter</kbd> new line</span>
+            <div class="composer-tools">
+              <button id="upload-pdf" class="upload-pdf" type="button" title="Add PDFs to this map" aria-label="Add PDFs to this map">
+                <span aria-hidden="true">＋</span> PDF
+              </button>
+              <span class="hint"><kbd>Enter</kbd> send · <kbd>Shift</kbd> + <kbd>Enter</kbd> new line</span>
+            </div>
             <button id="send" class="send" type="submit" aria-label="Send message">↑</button>
           </div>
+          <input id="pdf-input" type="file" accept="application/pdf,.pdf" multiple hidden>
         </form>
-        <p class="privacy-note">Your map stays in this browser.</p>
+        <p class="privacy-note">Your map stays in this browser. Added PDFs are uploaded to the configured API.</p>
       </div>
     </section>
 
@@ -147,11 +169,12 @@
         </label>
         <label>
           System instructions
-          <textarea id="system-prompt" rows="3">You are a patient technical tutor. Use clear Markdown and LaTeX where useful. Build on the conversation context and explain assumptions.</textarea>
+          <textarea id="system-prompt" rows="3">You are a patient technical tutor. Use clear Markdown and LaTeX where useful. Use mathematical language, assume graduate level knowledge. Build on the conversation context and explain assumptions.</textarea>
         </label>
       </details>
       <div class="security-callout"><strong>Local-use note</strong> — any script running on this origin can access local storage. Use a restricted project key and never deploy this frontend publicly with a saved key.</div>
       <div class="dialog-actions">
+        <button id="clear-history" class="button button-ghost danger" type="button">Clear chat history</button>
         <button id="forget-key" class="button button-ghost danger" type="button">Forget key</button>
         <button class="button button-dark" value="save" type="submit">Save settings</button>
       </div>

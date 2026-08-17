@@ -4,6 +4,7 @@
   const STORAGE_KEY = 'study-pal:v1';
   const SETTINGS_KEY = 'study-pal:settings:v1';
   const USAGE_KEY = 'study-pal:usage:v1';
+  const PDF_REQUEST_LIMIT = 50 * 1024 * 1024;
   // USD per million tokens. Last checked against OpenAI Docs on 2026-08-17.
   const MODEL_PRICES = [
     { match: /^gpt-5\.6-terra(?:-|$)/, input: 2, cached: .2, output: 12 },
@@ -23,7 +24,7 @@
     apiKey: '',
     model: 'gpt-5-mini',
     apiUrl: 'https://api.openai.com/v1/responses',
-    systemPrompt: 'You are a patient technical tutor. Use clear Markdown and LaTeX where useful. Build on the conversation context and explain assumptions.'
+    systemPrompt: 'You are a patient technical tutor. Use clear Markdown and LaTeX where useful. Use mathematical language, assume graduate level knowledge. Build on the conversation context and explain assumptions.'
   };
 
   const $ = (selector, root = document) => root.querySelector(selector);
@@ -38,13 +39,18 @@
     monthTokens: $('#month-tokens'), usageMonth: $('#usage-month'), usageTotal: $('#usage-total'),
     usageCost: $('#usage-cost'), usageRequests: $('#usage-requests'), usageInput: $('#usage-input'),
     usageCached: $('#usage-cached'), usageOutput: $('#usage-output'), usageModels: $('#usage-models'),
-    usageRecent: $('#usage-recent'), usageNote: $('#usage-note')
+    usageRecent: $('#usage-recent'), usageNote: $('#usage-note'), historyList: $('#history-list'),
+    historyEmpty: $('#history-empty'), historyToggle: $('#toggle-history'),
+    attachments: $('#attachments'), uploadPDF: $('#upload-pdf'), pdfInput: $('#pdf-input')
   };
 
   let settings = loadJSON(SETTINGS_KEY, DEFAULT_SETTINGS);
-  let state = normalizeState(loadJSON(STORAGE_KEY, { nodes: [], activeId: null }));
+  let workspace = loadWorkspace();
+  let state = currentMap();
   let usageRecords = loadUsage();
   let activeRequest = null;
+  let uploadingPDFs = false;
+  let uploadTargetMapId = null;
   let selectedText = null;
   let saveTimer = 0;
   let toastTimer = 0;
@@ -61,6 +67,61 @@
     } catch { return []; }
   }
 
+  function blankMap() {
+    const now = Date.now();
+    return { id: uid(), title: 'Untitled map', titleCustom: false, nodes: [], attachments: [], activeId: null, createdAt: now, updatedAt: now };
+  }
+
+  function titleFromNodes(nodes) {
+    const first = nodes.find(node => !node.parentId) || nodes[0];
+    if (!first) return 'Untitled map';
+    const title = String(first.question).replace(/\s+/g, ' ').trim();
+    return title.length > 54 ? `${title.slice(0, 54)}…` : title;
+  }
+
+  function normalizeMap(value = {}) {
+    const normalized = normalizeState(value);
+    const attachments = Array.isArray(value.attachments) ? value.attachments
+      .filter(file => file && file.id && file.name)
+      .map(file => ({
+        id: String(file.id), name: String(file.name), size: Number(file.size) || 0,
+        createdAt: Number(file.createdAt) || Date.now(), detail: file.detail === 'high' ? 'high' : 'low'
+      })) : [];
+    const createdAt = Number(value.createdAt) || Number(normalized.nodes[0]?.createdAt) || Date.now();
+    return {
+      id: String(value.id || uid()),
+      title: String(value.title || titleFromNodes(normalized.nodes)),
+      titleCustom: Boolean(value.titleCustom),
+      ...normalized,
+      attachments,
+      createdAt,
+      updatedAt: Number(value.updatedAt) || Number(normalized.nodes.at(-1)?.createdAt) || createdAt
+    };
+  }
+
+  function loadWorkspace() {
+    let raw = null;
+    try { raw = JSON.parse(localStorage.getItem(STORAGE_KEY) || 'null'); } catch {}
+    let maps = [];
+    let activeMapId = null;
+    if (raw && Array.isArray(raw.maps)) {
+      maps = raw.maps.filter(Boolean).map(normalizeMap);
+      activeMapId = raw.activeMapId;
+    } else if (raw && Array.isArray(raw.nodes) && raw.nodes.length) {
+      // Migrate the original single-map schema in place.
+      const migrated = normalizeMap(raw);
+      maps = [migrated];
+      activeMapId = migrated.id;
+    }
+    if (!maps.length) maps.push(blankMap());
+    if (!maps.some(map => map.id === activeMapId)) activeMapId = maps[0].id;
+    return { version: 2, maps, activeMapId };
+  }
+
+  function currentMap() {
+    return workspace.maps.find(map => map.id === workspace.activeMapId) || workspace.maps[0];
+  }
+
   function normalizeState(value) {
     const nodes = Array.isArray(value.nodes) ? value.nodes.filter(n => n && n.id && n.question).map(node => {
       if (node.status !== 'loading') return node;
@@ -73,21 +134,33 @@
   function persistSoon() {
     clearTimeout(saveTimer);
     saveTimer = setTimeout(() => {
-      try { localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); }
-      catch { showToast('Browser storage is full — this map could not be saved'); }
+      try { localStorage.setItem(STORAGE_KEY, JSON.stringify(workspace)); }
+      catch { showToast('Browser storage is full — conversations could not be saved'); }
     }, 180);
   }
 
-  function nodeById(id) { return state.nodes.find(node => node.id === id); }
+  function persistNow() {
+    clearTimeout(saveTimer);
+    try { localStorage.setItem(STORAGE_KEY, JSON.stringify(workspace)); return true; }
+    catch { showToast('Browser storage is full — conversations could not be saved'); return false; }
+  }
 
-  function pathTo(id) {
+  function touchMap(map = state) { map.updatedAt = Date.now(); }
+
+  function refreshMapTitle(map = state) {
+    if (!map.titleCustom) map.title = titleFromNodes(map.nodes);
+  }
+
+  function nodeById(id, map = state) { return map.nodes.find(node => node.id === id); }
+
+  function pathTo(id, map = state) {
     const path = [];
     const seen = new Set();
-    let node = nodeById(id);
+    let node = nodeById(id, map);
     while (node && !seen.has(node.id)) {
       seen.add(node.id);
       path.push(node);
-      node = nodeById(node.parentId);
+      node = nodeById(node.parentId, map);
     }
     return path.reverse();
   }
@@ -185,7 +258,14 @@
     }
     els.conversation.replaceChildren(fragment);
     renderBranchContext();
-    if (scroll) requestAnimationFrame(() => window.scrollTo({ top: document.documentElement.scrollHeight, behavior: 'smooth' }));
+    if (scroll && state.activeId) requestAnimationFrame(() => {
+      if (scroll === 'bottom') {
+        window.scrollTo({ top: document.documentElement.scrollHeight, behavior: 'smooth' });
+        return;
+      }
+      const answer = $(`.message[data-node-id="${CSS.escape(state.activeId)}"] .answer`, els.conversation);
+      answer?.scrollIntoView({ block: 'start', behavior: 'smooth' });
+    });
   }
 
   function renderTree() {
@@ -232,33 +312,177 @@
     if (branching) els.branchLabel.textContent = active.question;
   }
 
-  function renderAll(options) { renderConversation(options); renderTree(); }
+  function renderHistory() {
+    const maps = workspace.maps
+      .filter(map => map.nodes.length > 0 || map.attachments.length > 0)
+      .sort((a, b) => b.updatedAt - a.updatedAt);
+    const fragment = document.createDocumentFragment();
+    for (const map of maps) {
+      const row = document.createElement('div');
+      row.className = 'history-row';
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.className = `history-item${map.id === workspace.activeMapId ? ' active' : ''}`;
+      button.dataset.mapId = map.id;
+      button.setAttribute('aria-current', map.id === workspace.activeMapId ? 'page' : 'false');
+      const date = new Date(map.updatedAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+      const pdfMeta = map.attachments.length ? ` · ${map.attachments.length} PDF${map.attachments.length === 1 ? '' : 's'}` : '';
+      button.innerHTML = `<span class="history-glyph" aria-hidden="true">${map.nodes.length || map.attachments.length ? '◇' : '＋'}</span><span class="history-copy"><span class="history-title">${escapeHTML(map.title)}</span><span class="history-meta">${map.nodes.length} ${map.nodes.length === 1 ? 'node' : 'nodes'}${pdfMeta} · ${date}</span></span>`;
+      const rename = document.createElement('button');
+      rename.type = 'button';
+      rename.className = 'rename-map';
+      rename.dataset.mapId = map.id;
+      rename.setAttribute('aria-label', `Rename conversation: ${map.title}`);
+      rename.title = 'Rename this conversation';
+      rename.textContent = '✎';
+      const remove = document.createElement('button');
+      remove.type = 'button';
+      remove.className = 'delete-map';
+      remove.dataset.mapId = map.id;
+      remove.setAttribute('aria-label', `Delete conversation: ${map.title}`);
+      remove.title = 'Delete this conversation';
+      remove.textContent = '×';
+      row.append(button, rename, remove);
+      fragment.append(row);
+    }
+    els.historyList.replaceChildren(fragment);
+    els.historyEmpty.hidden = maps.length > 0;
+    els.historyList.hidden = maps.length === 0;
+  }
+
+  function formatFileSize(bytes) {
+    if (!bytes) return '';
+    if (bytes < 1024 * 1024) return `${Math.max(1, Math.round(bytes / 1024))} KB`;
+    return `${(bytes / (1024 * 1024)).toFixed(bytes < 10 * 1024 * 1024 ? 1 : 0)} MB`;
+  }
+
+  function renderAttachments() {
+    const fragment = document.createDocumentFragment();
+    for (const file of state.attachments) {
+      const chip = document.createElement('span');
+      chip.className = 'attachment-chip';
+      chip.title = `${file.name}${file.size ? ` · ${formatFileSize(file.size)}` : ''} · Included with every question in this map`;
+      chip.innerHTML = `<span class="pdf-badge" aria-hidden="true">PDF</span><span class="attachment-name">${escapeHTML(file.name)}</span><button class="remove-attachment" type="button" data-file-id="${escapeHTML(file.id)}" aria-label="Remove ${escapeHTML(file.name)} from this map">×</button>`;
+      fragment.append(chip);
+    }
+    if (uploadingPDFs && state.id === uploadTargetMapId) {
+      const status = document.createElement('span');
+      status.className = 'attachment-chip upload-status';
+      status.innerHTML = '<span class="upload-spinner" aria-hidden="true"></span> Uploading…';
+      fragment.append(status);
+    }
+    els.attachments.replaceChildren(fragment);
+    els.attachments.hidden = !state.attachments.length && !(uploadingPDFs && state.id === uploadTargetMapId);
+    els.uploadPDF.disabled = uploadingPDFs || Boolean(activeRequest);
+  }
+
+  function renderAll(options) { renderConversation(options); renderTree(); renderHistory(); renderAttachments(); }
 
   function updateStreamedNode(node) {
-    if (state.activeId !== node.id) return;
+    if (state.activeId !== node.id || !state.nodes.includes(node)) return;
     const body = $(`.message[data-node-id="${CSS.escape(node.id)}"] .answer-body`, els.conversation);
     if (body) body.innerHTML = answerHTML(node);
   }
 
-  function inputFor(parentId, question) {
+  function inputFor(map, parentId, question) {
     const messages = [];
-    for (const node of pathTo(parentId)) {
+    for (const node of pathTo(parentId, map)) {
       messages.push({ role: 'user', content: node.question });
       if (node.answer) messages.push({ role: 'assistant', content: node.answer });
     }
-    messages.push({ role: 'user', content: question });
+    const content = map.attachments.map(file => ({ type: 'input_file', file_id: file.id, detail: file.detail || 'low' }));
+    content.push({ type: 'input_text', text: question });
+    messages.push({ role: 'user', content: map.attachments.length ? content : question });
     return messages;
+  }
+
+  function filesEndpoint() {
+    const url = new URL(settings.apiUrl);
+    if (!/\/responses\/?$/.test(url.pathname)) throw new Error('The configured endpoint is not a Responses API URL, so its Files endpoint cannot be derived.');
+    url.pathname = url.pathname.replace(/\/responses\/?$/, '/files');
+    url.search = '';
+    url.hash = '';
+    return url.toString();
+  }
+
+  async function uploadPDFs(fileList) {
+    const files = [...fileList];
+    if (!files.length) return;
+    if (activeRequest || uploadingPDFs) { showToast('Finish the current operation first'); return; }
+    if (!settings.apiKey) { openSettings(); showToast('Add an OpenAI API key before uploading'); return; }
+
+    const valid = files.filter(file => file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf'));
+    if (valid.length !== files.length) { showToast('Only PDF files can be added'); return; }
+    if (valid.some(file => file.size >= PDF_REQUEST_LIMIT)) { showToast('Each PDF must be smaller than 50 MB'); return; }
+    const existingBytes = state.attachments.reduce((total, file) => total + file.size, 0);
+    const addedBytes = valid.reduce((total, file) => total + file.size, 0);
+    if (existingBytes + addedBytes >= PDF_REQUEST_LIMIT) { showToast('PDFs in one map must total less than 50 MB'); return; }
+
+    const targetMap = state;
+    uploadingPDFs = true;
+    uploadTargetMapId = targetMap.id;
+    renderAttachments();
+    let uploaded = 0;
+    try {
+      const endpoint = filesEndpoint();
+      for (const file of valid) {
+        const form = new FormData();
+        form.append('purpose', 'user_data');
+        form.append('file', file, file.name);
+        const response = await fetch(endpoint, {
+          method: 'POST', headers: { 'Authorization': `Bearer ${settings.apiKey}` }, body: form
+        });
+        if (!response.ok) {
+          let message = `PDF upload failed (${response.status})`;
+          try { const data = await response.json(); message = data.error?.message || message; } catch {}
+          throw new Error(message);
+        }
+        const data = await response.json();
+        if (!data.id) throw new Error('The Files API did not return a file ID.');
+        targetMap.attachments.push({
+          id: String(data.id), name: String(data.filename || file.name),
+          size: Number(data.bytes) || file.size, createdAt: Date.now(), detail: 'low'
+        });
+        uploaded += 1;
+        touchMap(targetMap);
+        persistNow();
+        if (state === targetMap) renderAll();
+      }
+      showToast(`${uploaded} PDF${uploaded === 1 ? '' : 's'} added to this map`);
+    } catch (error) {
+      showToast(error.message || 'PDF upload failed');
+    } finally {
+      uploadingPDFs = false;
+      uploadTargetMapId = null;
+      els.pdfInput.value = '';
+      renderAll();
+    }
+  }
+
+  function removeAttachment(fileId) {
+    const file = state.attachments.find(candidate => candidate.id === fileId);
+    if (!file) return;
+    if (!confirm(`Remove “${file.name}” from this map? The uploaded copy is not deleted from the API provider.`)) return;
+    state.attachments = state.attachments.filter(candidate => candidate.id !== fileId);
+    touchMap();
+    persistNow();
+    renderAll();
+    showToast('PDF removed from this map');
   }
 
   async function ask(question, parentId = state.activeId) {
     question = question.trim();
     if (!question) return;
     if (activeRequest) { showToast('Stop or finish the current response first'); return; }
+    if (uploadingPDFs) { showToast('Wait for the PDF upload to finish'); return; }
     if (!settings.apiKey) { openSettings(); showToast('Add an OpenAI API key to begin'); return; }
 
+    const requestMap = state;
     const node = { id: uid(), parentId: parentId || null, question, answer: '', status: 'loading', createdAt: Date.now() };
-    state.nodes.push(node);
-    state.activeId = node.id;
+    requestMap.nodes.push(node);
+    requestMap.activeId = node.id;
+    refreshMapTitle(requestMap);
+    touchMap(requestMap);
     persistSoon();
     renderAll({ scroll: true });
     setBusy(true);
@@ -270,7 +494,7 @@
       const response = await fetch(settings.apiUrl, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${settings.apiKey}` },
-        body: JSON.stringify({ model: settings.model, instructions: settings.systemPrompt, input: inputFor(parentId, question), stream: true }),
+        body: JSON.stringify({ model: settings.model, instructions: settings.systemPrompt, input: inputFor(requestMap, parentId, question), stream: true }),
         signal: controller.signal
       });
       if (!response.ok) {
@@ -293,6 +517,7 @@
       node.error = error.name === 'AbortError' ? 'Response stopped.' : error.message;
     } finally {
       activeRequest = null;
+      touchMap(requestMap);
       persistSoon();
       setBusy(false);
       renderAll();
@@ -334,6 +559,7 @@
     els.prompt.disabled = busy;
     els.send.textContent = busy ? '■' : '↑';
     els.send.setAttribute('aria-label', busy ? 'Stop response' : 'Send message');
+    els.uploadPDF.disabled = busy || uploadingPDFs;
   }
 
   function openSettings() {
@@ -484,6 +710,106 @@
     els.usageDialog.showModal();
   }
 
+  function createNewMap() {
+    const existingBlank = workspace.maps.find(map => map.nodes.length === 0 && map.attachments.length === 0);
+    const map = existingBlank || blankMap();
+    if (!existingBlank) workspace.maps.push(map);
+    workspace.activeMapId = map.id;
+    state = map;
+    persistNow();
+    renderAll();
+    closeHistoryOnSmallScreen();
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+    els.prompt.focus();
+  }
+
+  function switchMap(mapId) {
+    const map = workspace.maps.find(candidate => candidate.id === mapId);
+    if (!map) { closeHistoryOnSmallScreen(); return; }
+    workspace.activeMapId = map.id;
+    state = map;
+    state.activeId = state.nodes.at(-1)?.id || null;
+    persistSoon();
+    hideSelectionMenu();
+    renderAll({ scroll: state.activeId ? 'bottom' : false });
+    closeHistoryOnSmallScreen();
+  }
+
+  function closeHistoryOnSmallScreen() {
+    if (matchMedia('(max-width: 1100px)').matches) document.body.classList.remove('history-open');
+    updateHistoryToggle();
+  }
+
+  function updateHistoryToggle() {
+    const small = matchMedia('(max-width: 1100px)').matches;
+    const open = small ? document.body.classList.contains('history-open') : !document.body.classList.contains('history-collapsed');
+    els.historyToggle.setAttribute('aria-expanded', String(open));
+  }
+
+  function toggleHistory() {
+    if (matchMedia('(max-width: 1100px)').matches) {
+      document.body.classList.remove('history-collapsed');
+      document.body.classList.toggle('history-open');
+      if (document.body.classList.contains('history-open')) document.body.classList.remove('map-open');
+    } else document.body.classList.toggle('history-collapsed');
+    updateHistoryToggle();
+  }
+
+  function clearChatHistory(message = 'Clear all saved conversations? Your API key and usage records will be kept. Uploaded API files will not be deleted.') {
+    if (!workspace.maps.some(map => map.nodes.length || map.attachments.length)) { showToast('Chat history is already empty'); return false; }
+    if (!confirm(message)) return false;
+    if (activeRequest) activeRequest.abort();
+    const map = blankMap();
+    workspace = { version: 2, maps: [map], activeMapId: map.id };
+    state = map;
+    persistNow();
+    renderAll();
+    showToast('All conversations cleared');
+    return true;
+  }
+
+  function deleteMap(mapId) {
+    const map = workspace.maps.find(candidate => candidate.id === mapId);
+    if (!map) return;
+    if (uploadingPDFs && uploadTargetMapId === map.id) { showToast('Wait for this map’s PDF upload to finish'); return; }
+    const remoteNote = map.attachments.length ? ' Uploaded API files will not be deleted.' : '';
+    if (!confirm(`Delete “${map.title}” and its entire conversation? This cannot be undone.${remoteNote}`)) return;
+    if (activeRequest && map.nodes.some(node => node.status === 'loading')) activeRequest.abort();
+
+    workspace.maps = workspace.maps.filter(candidate => candidate.id !== map.id);
+    if (!workspace.maps.length) workspace.maps.push(blankMap());
+    if (state === map) {
+      const next = [...workspace.maps]
+        .filter(candidate => candidate.nodes.length || candidate.attachments.length)
+        .sort((a, b) => b.updatedAt - a.updatedAt)[0] || workspace.maps[0];
+      workspace.activeMapId = next.id;
+      state = next;
+      state.activeId = state.nodes.at(-1)?.id || null;
+    }
+    persistNow();
+    renderAll({ scroll: state.activeId ? 'bottom' : false });
+    showToast('Conversation deleted');
+  }
+
+  function renameMap(mapId) {
+    const map = workspace.maps.find(candidate => candidate.id === mapId);
+    if (!map) return;
+    const value = prompt('Rename this conversation. Leave blank to restore its automatic title.', map.title);
+    if (value === null) return;
+    const title = value.replace(/\s+/g, ' ').trim();
+    if (title) {
+      map.title = title.slice(0, 120);
+      map.titleCustom = true;
+    } else {
+      map.titleCustom = false;
+      refreshMapTitle(map);
+    }
+    touchMap(map);
+    persistNow();
+    renderHistory();
+    showToast(title ? 'Conversation renamed' : 'Automatic title restored');
+  }
+
   function showSelectionMenu(text, nodeId, rect) {
     selectedText = { text: text.slice(0, 5000), nodeId };
     els.selectionPreview.textContent = text.length > 240 ? `${text.slice(0, 240)}…` : text;
@@ -515,8 +841,16 @@
   document.addEventListener('click', event => {
     const starter = event.target.closest('.starter');
     if (starter) { els.prompt.value = starter.dataset.prompt; els.prompt.focus(); }
+    const historyItem = event.target.closest('.history-item');
+    if (historyItem) { switchMap(historyItem.dataset.mapId); return; }
+    const renameConversation = event.target.closest('.rename-map');
+    if (renameConversation) { renameMap(renameConversation.dataset.mapId); return; }
+    const deleteConversation = event.target.closest('.delete-map');
+    if (deleteConversation) { deleteMap(deleteConversation.dataset.mapId); return; }
+    const removeFile = event.target.closest('.remove-attachment');
+    if (removeFile) { removeAttachment(removeFile.dataset.fileId); return; }
     const treeNode = event.target.closest('.tree-node');
-    if (treeNode) { state.activeId = treeNode.dataset.nodeId; persistSoon(); renderAll(); document.body.classList.remove('map-open'); scrollTo({ top: 0, behavior: 'smooth' }); }
+    if (treeNode) { state.activeId = treeNode.dataset.nodeId; persistSoon(); renderAll({ scroll: true }); document.body.classList.remove('map-open'); }
     const branch = event.target.closest('.branch-here');
     if (branch) { state.activeId = branch.closest('.message').dataset.nodeId; persistSoon(); renderAll(); els.prompt.focus(); }
     const retry = event.target.closest('.retry-node');
@@ -556,6 +890,11 @@
   $('#open-settings').addEventListener('click', openSettings);
   $('#open-usage').addEventListener('click', openUsage);
   $('#theme-toggle').addEventListener('click', toggleTheme);
+  $('#toggle-history').addEventListener('click', toggleHistory);
+  $('#study-pal-home').addEventListener('click', event => { event.preventDefault(); createNewMap(); });
+  $('#new-map-sidebar').addEventListener('click', createNewMap);
+  els.uploadPDF.addEventListener('click', () => els.pdfInput.click());
+  els.pdfInput.addEventListener('change', () => uploadPDFs(els.pdfInput.files));
   $('#close-settings').addEventListener('click', () => els.settings.close());
   $('#close-usage').addEventListener('click', () => els.usageDialog.close());
   $('#reset-usage').addEventListener('click', () => {
@@ -575,18 +914,16 @@
     updateKeyStatus(); els.settings.close(); showToast('Settings saved');
   });
   $('#forget-key').addEventListener('click', () => { settings.apiKey = ''; els.apiKey.value = ''; localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings)); updateKeyStatus(); showToast('API key removed'); });
-  $('#new-session').addEventListener('click', () => {
-    if (!state.nodes.length || confirm('Start a new map? This will delete the current conversation tree from this browser.')) {
-      if (activeRequest) activeRequest.abort();
-      state = { nodes: [], activeId: null }; localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); renderAll();
-    }
-  });
+  $('#clear-history').addEventListener('click', () => clearChatHistory());
   $('#clear-branch').addEventListener('click', () => { state.activeId = state.nodes.at(-1)?.id || null; persistSoon(); renderAll({ scroll: true }); });
   $('#collapse-map').addEventListener('click', () => { document.body.classList.remove('map-open'); document.body.classList.add('map-collapsed'); $('#expand-map').hidden = false; });
-  $('#expand-map').addEventListener('click', () => { document.body.classList.remove('map-collapsed'); document.body.classList.add('map-open'); $('#expand-map').hidden = true; });
+  $('#expand-map').addEventListener('click', () => { document.body.classList.remove('map-collapsed', 'history-open'); document.body.classList.add('map-open'); $('#expand-map').hidden = true; updateHistoryToggle(); });
+  addEventListener('resize', updateHistoryToggle, { passive: true });
 
   updateKeyStatus();
   updateThemeButton();
   updateUsageButton();
-  renderAll();
+  updateHistoryToggle();
+  state.activeId = state.nodes.at(-1)?.id || null;
+  renderAll({ scroll: state.activeId ? 'bottom' : false });
 })();

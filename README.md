@@ -16,6 +16,9 @@ The app is intentionally frontend-only: there is no build step, package manager,
 - Responsive concept map for desktop and small screens
 - Persistent light/dark theme with system-theme detection
 - Monthly token tracking with per-model details and a local billing estimate
+- Independent chat-history clearing and per-conversation deletion
+- Multiple persistent maps with a browsable conversation sidebar
+- Per-map PDF context for books and papers, uploaded once through the Files API
 - Large-answer optimizations: throttled stream painting and `content-visibility`
 
 ## Run locally
@@ -43,6 +46,8 @@ Open the local URL printed by `serve`.
 3. Keep `gpt-5-mini`, or enter another model available to your API project.
 4. Save and ask a question.
 
+To ask about a book or paper, choose **+ PDF** beside the composer and select one or more PDFs. The files are attached to the current map and included with every new question in that map, including questions asked from older branches. Each file must be under 50 MB, and all attached files in a map must total under 50 MB.
+
 The endpoint is configurable under **Advanced**, which is useful for an OpenAI-compatible Responses API. Compatibility depends on whether that provider implements the Responses API and browser CORS.
 
 ## How branching works
@@ -51,11 +56,25 @@ Each node stores its parent ID. Clicking a node makes it the active context and 
 
 The complete parent-path conversation is sent with each request. This makes every branch self-contained and avoids coupling local history to provider-side response IDs.
 
+## Multiple maps
+
+Choose **New map** in the header or conversation sidebar to open a blank map. The current map is retained automatically. Use the left **Conversations** sidebar to switch between saved maps; each entry shows its title, node count, and last activity date. Use ✎ to rename a map or × to delete its entire conversation. A custom title remains unchanged as new questions are added; submitting a blank title restores automatic naming. Existing sessions from the original single-map storage format are migrated automatically.
+
+**Settings → Clear chat history** is the explicit destructive action that removes all saved maps. It does not remove the API key, other settings, or the separate API-usage ledger.
+
+## PDF context
+
+PDFs are uploaded directly from the browser to the Files endpoint derived from the configured Responses API URL. Only their file IDs, names, and sizes are stored in `localStorage`; the PDF bytes are not copied into browser storage. Page images use low visual detail to reduce token use, while extracted PDF text remains available to the model. Use a vision-capable model that supports PDF inputs.
+
+PDF parsing adds extracted text and page images to the prompt, so large books can consume substantial input tokens on every question. The header usage tracker includes tokens reported for these requests. For very large collections or frequent querying, OpenAI recommends retrieval with File Search; this lightweight local app intentionally uses direct PDF input and does not create vector stores.
+
+Removing a PDF chip or clearing local chat history detaches the file locally but does **not** delete the uploaded copy from OpenAI. Delete retained files separately through your OpenAI account if needed. Custom API providers must expose a compatible `/files` endpoint next to their configured `/responses` endpoint.
+
 ## Storage and security
 
 The browser stores three local keys:
 
-- `study-pal:v1` — conversation nodes
+- `study-pal:v1` — multi-map conversation workspace, PDF file references, and active-map selection
 - `study-pal:settings:v1` — API key, model, endpoint, and system instructions
 - `study-pal:usage:v1` — token usage and estimated request costs recorded by this browser
 
