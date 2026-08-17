@@ -3,6 +3,22 @@
 
   const STORAGE_KEY = 'study-pal:v1';
   const SETTINGS_KEY = 'study-pal:settings:v1';
+  const USAGE_KEY = 'study-pal:usage:v1';
+  // USD per million tokens. Last checked against OpenAI Docs on 2026-08-17.
+  const MODEL_PRICES = [
+    { match: /^gpt-5\.6-terra(?:-|$)/, input: 2, cached: .2, output: 12 },
+    { match: /^gpt-5\.6-luna(?:-|$)/, input: .2, cached: .02, output: 1.2 },
+    { match: /^gpt-5\.6-sol(?:-|$)/, input: 5, cached: .5, output: 30 },
+    { match: /^gpt-5\.6$/, input: 5, cached: .5, output: 30 },
+    { match: /^gpt-5\.4-mini(?:-|$)/, input: .75, cached: .075, output: 4.5 },
+    { match: /^gpt-5\.4(?:-20\d{2}|$)/, input: 2.5, cached: .25, output: 15 },
+    { match: /^gpt-5-mini(?:-|$)/, input: .25, cached: .025, output: 2 },
+    { match: /^gpt-5-nano(?:-|$)/, input: .05, cached: .005, output: .4 },
+    { match: /^gpt-5(?:-20\d{2}|$)/, input: 1.25, cached: .125, output: 10 },
+    { match: /^gpt-4\.1-mini(?:-|$)/, input: .4, cached: .1, output: 1.6 },
+    { match: /^gpt-4\.1(?:-20\d{2}|$)/, input: 2, cached: .5, output: 8 },
+    { match: /^gpt-4o-mini(?:-|$)/, input: .15, cached: .075, output: .6 }
+  ];
   const DEFAULT_SETTINGS = {
     apiKey: '',
     model: 'gpt-5-mini',
@@ -18,11 +34,16 @@
     branchLabel: $('#branch-label'), selectionMenu: $('#selection-menu'), selectionPreview: $('#selection-preview'),
     selectionAction: $('#selection-action'), selectionCustom: $('#selection-custom'), settings: $('#settings-dialog'),
     apiKey: $('#api-key'), model: $('#model'), apiUrl: $('#api-url'), systemPrompt: $('#system-prompt'),
-    keyStatus: $('#key-status'), toast: $('#toast')
+    keyStatus: $('#key-status'), toast: $('#toast'), usageDialog: $('#usage-dialog'),
+    monthTokens: $('#month-tokens'), usageMonth: $('#usage-month'), usageTotal: $('#usage-total'),
+    usageCost: $('#usage-cost'), usageRequests: $('#usage-requests'), usageInput: $('#usage-input'),
+    usageCached: $('#usage-cached'), usageOutput: $('#usage-output'), usageModels: $('#usage-models'),
+    usageRecent: $('#usage-recent'), usageNote: $('#usage-note')
   };
 
   let settings = loadJSON(SETTINGS_KEY, DEFAULT_SETTINGS);
   let state = normalizeState(loadJSON(STORAGE_KEY, { nodes: [], activeId: null }));
+  let usageRecords = loadUsage();
   let activeRequest = null;
   let selectedText = null;
   let saveTimer = 0;
@@ -31,6 +52,13 @@
   function loadJSON(key, fallback) {
     try { return { ...fallback, ...JSON.parse(localStorage.getItem(key) || '{}') }; }
     catch { return { ...fallback }; }
+  }
+
+  function loadUsage() {
+    try {
+      const records = JSON.parse(localStorage.getItem(USAGE_KEY) || '[]');
+      return Array.isArray(records) ? records.filter(record => record && Number.isFinite(record.timestamp)) : [];
+    } catch { return []; }
   }
 
   function normalizeState(value) {
@@ -236,6 +264,7 @@
     setBusy(true);
     const controller = new AbortController();
     activeRequest = controller;
+    let completedUsage = null;
 
     try {
       const response = await fetch(settings.apiUrl, {
@@ -252,9 +281,13 @@
       if (!response.body) throw new Error('This browser did not provide a streaming response body.');
       await consumeSSE(response.body, event => {
         if (event.type === 'response.output_text.delta') node.answer += event.delta || '';
+        if (event.type === 'response.completed' || event.type === 'response.done') {
+          completedUsage = event.response?.usage || event.usage || completedUsage;
+        }
         if (event.type === 'response.failed') throw new Error(event.response?.error?.message || 'The model response failed.');
       }, () => updateStreamedNode(node));
       node.status = 'complete';
+      if (completedUsage) recordUsage(node.id, settings.model, settings.apiUrl, completedUsage);
     } catch (error) {
       node.status = 'error';
       node.error = error.name === 'AbortError' ? 'Response stopped.' : error.message;
@@ -276,22 +309,24 @@
       paintQueued = true;
       setTimeout(() => { paintQueued = false; onPaint(); }, 70);
     };
+    const processBlock = block => {
+      for (const line of block.split(/\r?\n/)) {
+        if (!line.startsWith('data:')) continue;
+        const data = line.slice(5).trim();
+        if (!data || data === '[DONE]') continue;
+        onEvent(JSON.parse(data));
+        queuePaint();
+      }
+    };
     while (true) {
       const { done, value } = await reader.read();
       buffer += decoder.decode(value || new Uint8Array(), { stream: !done });
       const blocks = buffer.split(/\r?\n\r?\n/);
       buffer = blocks.pop() || '';
-      for (const block of blocks) {
-        for (const line of block.split(/\r?\n/)) {
-          if (!line.startsWith('data:')) continue;
-          const data = line.slice(5).trim();
-          if (!data || data === '[DONE]') continue;
-          onEvent(JSON.parse(data));
-          queuePaint();
-        }
-      }
+      for (const block of blocks) processBlock(block);
       if (done) break;
     }
+    if (buffer.trim()) processBlock(buffer);
     onPaint();
   }
 
@@ -332,6 +367,121 @@
     document.documentElement.dataset.theme = next;
     try { localStorage.setItem('study-pal:theme', next); } catch {}
     updateThemeButton();
+  }
+
+  function priceForModel(model) {
+    const key = String(model || '').toLowerCase();
+    return MODEL_PRICES.find(price => price.match.test(key)) || null;
+  }
+
+  function isOpenAIEndpoint(apiUrl) {
+    try { return new URL(apiUrl).hostname === 'api.openai.com'; }
+    catch { return false; }
+  }
+
+  function recordUsage(nodeId, model, apiUrl, rawUsage) {
+    if (usageRecords.some(record => record.nodeId === nodeId)) return;
+    const inputTokens = Number(rawUsage.input_tokens) || 0;
+    const outputTokens = Number(rawUsage.output_tokens) || 0;
+    const cachedTokens = Math.min(inputTokens, Number(rawUsage.input_tokens_details?.cached_tokens) || 0);
+    const totalTokens = Number(rawUsage.total_tokens) || inputTokens + outputTokens;
+    const price = isOpenAIEndpoint(apiUrl) ? priceForModel(model) : null;
+    const costUSD = price
+      ? (((inputTokens - cachedTokens) * price.input) + (cachedTokens * price.cached) + (outputTokens * price.output)) / 1_000_000
+      : null;
+    usageRecords.push({
+      id: uid(), nodeId, timestamp: Date.now(), model: String(model || 'unknown'),
+      inputTokens, cachedTokens, outputTokens, totalTokens, costUSD,
+      rates: price ? { input: price.input, cached: price.cached, output: price.output } : null
+    });
+    // Keep bounded history while retaining roughly a year of normal personal use.
+    usageRecords = usageRecords.slice(-2000);
+    try { localStorage.setItem(USAGE_KEY, JSON.stringify(usageRecords)); }
+    catch { showToast('Usage was returned, but local usage history is full'); }
+    updateUsageButton();
+  }
+
+  function currentMonthRecords() {
+    const now = new Date();
+    return usageRecords.filter(record => {
+      const date = new Date(record.timestamp);
+      return date.getFullYear() === now.getFullYear() && date.getMonth() === now.getMonth();
+    });
+  }
+
+  function sum(records, key) { return records.reduce((total, record) => total + (Number(record[key]) || 0), 0); }
+
+  function formatTokens(value, compact = false) {
+    const number = Number(value) || 0;
+    if (!compact || number < 1000) return Math.round(number).toLocaleString();
+    if (number < 1_000_000) return `${(number / 1000).toFixed(number < 10_000 ? 1 : 0)}K`;
+    return `${(number / 1_000_000).toFixed(number < 10_000_000 ? 1 : 0)}M`;
+  }
+
+  function formatCost(value) {
+    if (!Number.isFinite(value)) return 'Unpriced';
+    if (value > 0 && value < .01) return '<$0.01';
+    return value.toLocaleString(undefined, { style: 'currency', currency: 'USD', minimumFractionDigits: 2, maximumFractionDigits: value < 1 ? 4 : 2 });
+  }
+
+  function updateUsageButton() {
+    const total = sum(currentMonthRecords(), 'totalTokens');
+    els.monthTokens.textContent = formatTokens(total, true);
+    const label = `${formatTokens(total)} tokens tracked this month`;
+    $('#open-usage').title = label;
+    $('#open-usage').setAttribute('aria-label', `${label}. Open API usage details`);
+  }
+
+  function usageRowsByModel(records) {
+    const groups = new Map();
+    for (const record of records) {
+      const model = String(record.model || 'unknown');
+      if (!groups.has(model)) groups.set(model, { model, totalTokens: 0, costUSD: 0, unpriced: 0 });
+      const group = groups.get(model);
+      group.totalTokens += Number(record.totalTokens) || 0;
+      if (Number.isFinite(record.costUSD)) group.costUSD += record.costUSD;
+      else group.unpriced += 1;
+    }
+    return [...groups.values()].sort((a, b) => b.totalTokens - a.totalTokens);
+  }
+
+  function renderUsage() {
+    const records = currentMonthRecords().sort((a, b) => b.timestamp - a.timestamp);
+    const totalCost = records.reduce((total, record) => total + (Number.isFinite(record.costUSD) ? record.costUSD : 0), 0);
+    const unpriced = records.filter(record => !Number.isFinite(record.costUSD)).length;
+    els.usageMonth.textContent = new Date().toLocaleDateString(undefined, { month: 'long', year: 'numeric' });
+    els.usageTotal.textContent = formatTokens(sum(records, 'totalTokens'));
+    els.usageCost.textContent = records.length && unpriced === records.length
+      ? 'Unpriced'
+      : `${formatCost(totalCost)}${unpriced ? ' +' : ''}`;
+    els.usageRequests.textContent = formatTokens(records.length);
+    els.usageInput.textContent = formatTokens(sum(records, 'inputTokens'));
+    els.usageCached.textContent = formatTokens(sum(records, 'cachedTokens'));
+    els.usageOutput.textContent = formatTokens(sum(records, 'outputTokens'));
+
+    const groups = usageRowsByModel(records);
+    els.usageModels.innerHTML = groups.length ? groups.map(group => `
+      <div class="usage-row">
+        <span class="model-name" title="${escapeHTML(group.model)}">${escapeHTML(group.model)}</span>
+        <span class="row-tokens">${formatTokens(group.totalTokens)} tokens</span>
+        <span class="row-cost">${group.unpriced ? 'Partly unpriced' : formatCost(group.costUSD)}</span>
+      </div>`).join('') : '<p class="usage-empty">No tracked requests this month.</p>';
+
+    els.usageRecent.innerHTML = records.length ? records.slice(0, 12).map(record => `
+      <div class="usage-row">
+        <span class="model-name">${new Date(record.timestamp).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}</span>
+        <span class="row-tokens">${formatTokens(record.totalTokens)} tokens</span>
+        <span class="row-cost">${formatCost(record.costUSD)}</span>
+      </div>`).join('') : '<p class="usage-empty">Completed requests will appear here.</p>';
+
+    els.usageNote.textContent = unpriced
+      ? `${unpriced} request${unpriced === 1 ? '' : 's'} could not be estimated because the model or endpoint has no local price entry.`
+      : 'Estimate uses standard OpenAI text-token prices recorded when each request completed. Pricing table checked August 17, 2026.';
+  }
+
+  function openUsage() {
+    renderUsage();
+    els.usageDialog.showModal();
   }
 
   function showSelectionMenu(text, nodeId, rect) {
@@ -404,8 +554,19 @@
   $('#close-selection').addEventListener('click', hideSelectionMenu);
   window.addEventListener('scroll', hideSelectionMenu, { passive: true });
   $('#open-settings').addEventListener('click', openSettings);
+  $('#open-usage').addEventListener('click', openUsage);
   $('#theme-toggle').addEventListener('click', toggleTheme);
   $('#close-settings').addEventListener('click', () => els.settings.close());
+  $('#close-usage').addEventListener('click', () => els.usageDialog.close());
+  $('#reset-usage').addEventListener('click', () => {
+    if (!usageRecords.length || confirm('Reset the locally tracked API usage history? This cannot be undone.')) {
+      usageRecords = [];
+      localStorage.removeItem(USAGE_KEY);
+      updateUsageButton();
+      renderUsage();
+      showToast('Local usage history reset');
+    }
+  });
   $('#toggle-key').addEventListener('click', event => { const show = els.apiKey.type === 'password'; els.apiKey.type = show ? 'text' : 'password'; event.target.textContent = show ? 'Hide' : 'Show'; });
   $('#settings-form').addEventListener('submit', event => {
     event.preventDefault();
@@ -426,5 +587,6 @@
 
   updateKeyStatus();
   updateThemeButton();
+  updateUsageButton();
   renderAll();
 })();

@@ -15,6 +15,7 @@ The app is intentionally frontend-only: there is no build step, package manager,
 - Lightweight vanilla HTML, CSS, and JavaScript
 - Responsive concept map for desktop and small screens
 - Persistent light/dark theme with system-theme detection
+- Monthly token tracking with per-model details and a local billing estimate
 - Large-answer optimizations: throttled stream painting and `content-visibility`
 
 ## Run locally
@@ -52,10 +53,13 @@ The complete parent-path conversation is sent with each request. This makes ever
 
 ## Storage and security
 
-The browser stores two local keys:
+The browser stores three local keys:
 
 - `study-pal:v1` — conversation nodes
 - `study-pal:settings:v1` — API key, model, endpoint, and system instructions
+- `study-pal:usage:v1` — token usage and estimated request costs recorded by this browser
+
+The usage button in the header counts tokens reported by completed Responses API requests made from this browser. Its estimated USD amount uses a local pricing table and is not an invoice: it cannot see other browsers or applications, historical requests made before tracking was added, credits, taxes, or special pricing. Use the linked OpenAI usage dashboard as the source of truth for billing.
 
 This design is convenient for a private tool on your own laptop, but browser storage is not a secure secret vault. Any JavaScript executing on the same origin can read it. Therefore:
 

@@ -56,6 +56,9 @@ button { color: inherit; }
 .brand { display: flex; align-items: center; gap: 10px; color: inherit; text-decoration: none; font-weight: 760; letter-spacing: -.02em; }
 .brand-mark { display: grid; place-items: center; width: 30px; height: 30px; border-radius: 50% 48% 44% 52%; background: var(--ink); color: white; font-family: Georgia, serif; font-style: italic; }
 .top-actions { display: flex; align-items: center; gap: 8px; }
+.usage-button { border: 1px solid var(--line); border-radius: 999px; background: var(--card); padding: 8px 12px; cursor: pointer; color: var(--muted); font-size: .72rem; font-variant-numeric: tabular-nums; white-space: nowrap; transition: transform .15s, border-color .15s; }
+.usage-button:hover { transform: translateY(-1px); border-color: var(--sage); }
+.usage-button #month-tokens { color: var(--ink); font-weight: 800; }
 .theme-toggle { display: grid; place-items: center; width: 36px; height: 36px; border: 1px solid var(--line); border-radius: 50%; background: transparent; cursor: pointer; font-size: 1rem; transition: transform .18s, background .18s; }
 .theme-toggle:hover { background: var(--card); transform: rotate(8deg); }
 .button { border: 1px solid transparent; border-radius: 999px; padding: 9px 15px; cursor: pointer; font-weight: 650; font-size: .86rem; transition: transform .15s, background .15s; }
@@ -176,6 +179,29 @@ body.map-collapsed .composer-wrap { right: 0; }
 .security-callout { background: #f4eee5; color: #6d5945; border-radius: 9px; padding: 10px 12px; font-size: .7rem; line-height: 1.5; }
 .dialog-actions { display: flex; justify-content: space-between; margin-top: 18px; }
 .danger { color: #9d443e; }
+.usage-dialog { width: min(620px, calc(100vw - 28px)); }
+.usage-summary { display: grid; grid-template-columns: 1.25fr 1fr .75fr; gap: 9px; margin: 18px 0 20px; }
+.usage-stat { min-width: 0; padding: 14px; border: 1px solid var(--line); border-radius: 12px; background: var(--paper); }
+.usage-stat.primary { background: #e8efeb; border-color: #cad8d0; }
+.usage-stat span { display: block; margin-bottom: 6px; color: var(--muted); font-size: .65rem; text-transform: uppercase; letter-spacing: .08em; }
+.usage-stat strong { display: block; overflow: hidden; text-overflow: ellipsis; font: 400 1.35rem/1.1 Georgia, serif; font-variant-numeric: tabular-nums; }
+.usage-section { margin: 17px 0; }
+.usage-section h3 { margin: 0 0 8px; font-size: .69rem; letter-spacing: .09em; text-transform: uppercase; }
+.token-breakdown { display: grid; grid-template-columns: repeat(3, 1fr); border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
+.token-breakdown span { padding: 10px; color: var(--muted); font-size: .68rem; }
+.token-breakdown span + span { border-left: 1px solid var(--line); }
+.token-breakdown strong { display: block; margin-top: 3px; color: var(--ink); font-size: .85rem; font-variant-numeric: tabular-nums; }
+.usage-models, .usage-recent { border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
+.usage-row { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; align-items: center; gap: 12px; padding: 9px 11px; font-size: .72rem; }
+.usage-row + .usage-row { border-top: 1px solid var(--line); }
+.usage-row .model-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: "SFMono-Regular", Consolas, monospace; }
+.usage-row .row-tokens, .usage-row .row-cost { color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.usage-recent { max-height: 176px; overflow-y: auto; }
+.usage-empty { margin: 0; padding: 15px; color: var(--muted); text-align: center; font-size: .74rem; }
+.usage-note { margin: 14px 0 5px; padding: 9px 11px; border-radius: 9px; background: #f1f2ed; color: var(--muted); font-size: .7rem; line-height: 1.45; }
+.usage-disclaimer { color: var(--muted); font-size: .64rem; line-height: 1.45; }
+.usage-dashboard { text-decoration: none; text-align: center; }
+.usage-dialog .dialog-actions { gap: 8px; align-items: center; }
 .toast { position: fixed; z-index: 60; left: 50%; bottom: 24px; transform: translate(-50%, 20px); background: var(--ink); color: white; padding: 9px 14px; border-radius: 9px; font-size: .76rem; opacity: 0; pointer-events: none; transition: .2s; }
 .toast.show { opacity: 1; transform: translate(-50%, 0); }
 
@@ -194,6 +220,7 @@ body.map-collapsed .composer-wrap { right: 0; }
   .app-shell { padding-top: 60px; }
   .map-panel { top: 60px; }
   .top-actions .button { padding: 8px 10px; }
+  #new-session { display: none; }
   .welcome { width: calc(100% - 28px); }
   .welcome h1 { font-size: 3.2rem; }
   .conversation { width: calc(100% - 26px); padding-top: 25px; }
@@ -202,6 +229,18 @@ body.map-collapsed .composer-wrap { right: 0; }
   .answer { grid-template-columns: 25px minmax(0,1fr); gap: 9px; }
   .answer-mark { width: 25px; height: 25px; }
   .answer-actions { margin-left: 34px; }
+  .usage-summary { grid-template-columns: 1fr 1fr; }
+  .usage-stat:last-child { grid-column: 1 / -1; }
+  .usage-dialog form { padding: 19px; }
+  .usage-dialog .dialog-actions { display: grid; grid-template-columns: 1fr 1fr; }
+  .usage-dialog .dialog-actions .button-dark { grid-column: 1 / -1; }
+}
+@media (max-width: 390px) {
+  .brand > span:last-child, .usage-caption, .settings-label { display: none; }
+  .top-actions { gap: 5px; }
+  .usage-button { min-width: 44px; padding-inline: 9px; }
+  .token-breakdown { grid-template-columns: 1fr; }
+  .token-breakdown span + span { border-left: 0; border-top: 1px solid var(--line); }
 }
 @media (prefers-reduced-motion: reduce) { *, *::before, *::after { scroll-behavior: auto !important; animation: none !important; transition: none !important; } }
 
@@ -233,3 +272,5 @@ body.map-collapsed .composer-wrap { right: 0; }
 :root[data-theme="dark"] .selection-menu blockquote { background: #1a211e; }
 :root[data-theme="dark"] .security-callout { background: #30291f; color: #d1b99e; }
 :root[data-theme="dark"] .error-text { color: #f0aaa2; background: #3c2422; }
+:root[data-theme="dark"] .usage-stat.primary { background: #223029; border-color: #35493f; }
+:root[data-theme="dark"] .usage-note { background: #1a211e; }

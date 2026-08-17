@@ -22,13 +22,16 @@
       <span>Study Pal</span>
     </a>
     <div class="top-actions">
+      <button id="open-usage" class="usage-button" type="button" aria-haspopup="dialog" aria-label="Open API usage details">
+        <span id="month-tokens">0</span> <span class="usage-caption">tokens</span>
+      </button>
       <button id="theme-toggle" class="theme-toggle" type="button" aria-label="Switch to dark theme" title="Switch theme">
         <span aria-hidden="true">☾</span>
       </button>
       <button id="new-session" class="button button-ghost" type="button">New map</button>
       <button id="open-settings" class="button button-dark" type="button" aria-haspopup="dialog">
         <span class="status-dot" id="key-status" aria-hidden="true"></span>
-        Settings
+        <span class="settings-label">Settings</span>
       </button>
     </div>
   </header>
@@ -151,6 +154,61 @@
       <div class="dialog-actions">
         <button id="forget-key" class="button button-ghost danger" type="button">Forget key</button>
         <button class="button button-dark" value="save" type="submit">Save settings</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="usage-dialog" class="settings-dialog usage-dialog">
+    <form method="dialog">
+      <div class="dialog-heading">
+        <div>
+          <span class="eyebrow">Local estimate</span>
+          <h2>API usage</h2>
+        </div>
+        <button id="close-usage" class="icon-button" type="button" aria-label="Close API usage">×</button>
+      </div>
+      <p class="settings-copy"><span id="usage-month"></span> · Requests made from this browser</p>
+
+      <div class="usage-summary">
+        <div class="usage-stat primary">
+          <span>Tokens</span>
+          <strong id="usage-total">0</strong>
+        </div>
+        <div class="usage-stat">
+          <span>Estimated cost</span>
+          <strong id="usage-cost">$0.00</strong>
+        </div>
+        <div class="usage-stat">
+          <span>Requests</span>
+          <strong id="usage-requests">0</strong>
+        </div>
+      </div>
+
+      <section class="usage-section" aria-labelledby="token-breakdown-title">
+        <h3 id="token-breakdown-title">Token breakdown</h3>
+        <div class="token-breakdown">
+          <span>Input <strong id="usage-input">0</strong></span>
+          <span>Cached input <strong id="usage-cached">0</strong></span>
+          <span>Output <strong id="usage-output">0</strong></span>
+        </div>
+      </section>
+
+      <section class="usage-section" aria-labelledby="models-title">
+        <h3 id="models-title">By model</h3>
+        <div id="usage-models" class="usage-models"></div>
+      </section>
+
+      <section class="usage-section" aria-labelledby="recent-title">
+        <h3 id="recent-title">Recent requests</h3>
+        <div id="usage-recent" class="usage-recent"></div>
+      </section>
+
+      <p id="usage-note" class="usage-note"></p>
+      <p class="usage-disclaimer">This is not your OpenAI invoice. It excludes requests from other browsers and applications, incomplete requests without returned usage, taxes, credits, tools, special processing, and usage recorded before this tracker was added. Prices can change.</p>
+      <div class="dialog-actions">
+        <button id="reset-usage" class="button button-ghost danger" type="button">Reset local history</button>
+        <a class="button button-ghost usage-dashboard" href="https://platform.openai.com/usage" target="_blank" rel="noopener noreferrer">Official dashboard ↗</a>
+        <button class="button button-dark" value="close" type="submit">Done</button>
       </div>
     </form>
   </dialog>
