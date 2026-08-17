@@ -6,23 +6,33 @@ The app is intentionally frontend-only: there is no build step, package manager,
 
 ## Features
 
-- Branching conversation tree with clickable question nodes
-- Root-to-current-branch conversation view
-- Ask about selected answer text with suggested or custom follow-ups
-- Streaming responses
-- Markdown, fenced code blocks, and LaTeX rendering through KaTeX
-- Persistent sessions and API settings in `localStorage`
-- Lightweight vanilla HTML, CSS, and JavaScript
-- Responsive concept map for desktop and small screens
-- Persistent light/dark theme with system-theme detection
-- Monthly token tracking with per-model details and a local billing estimate
-- Independent chat-history clearing and per-conversation deletion
-- Multiple persistent maps with a browsable conversation sidebar
-- Per-map PDF context for books and papers, uploaded once through the Files API
-- Debounced search across map titles, questions, answers, and PDF names
-- Collapsible, zoomable concept trees with active-path highlighting
-- Vim-style keyboard navigation for nodes, maps, search, and the composer
-- Large-answer optimizations: throttled stream painting and `content-visibility`
+- can branch off any previous answer
+- select a chunk of text from an answer and ask about it
+- vim-like shortcuts
+- plain js + html + css
+- session info (api token & history) stays local on your browser, questions go through openai's api
+- you see token usage and cost estimations
+
+other:
+- branching conversation tree with clickable question nodes
+- root-to-current-branch conversation view
+- ask about selected answer text with suggested or custom follow-ups
+- streaming responses
+- markdown, fenced code blocks, and LaTeX rendering through KaTeX
+- persistent sessions and API settings in `localStorage`
+- lightweight vanilla HTML, CSS, and JavaScript
+- responsive concept map for desktop and small screens
+- persistent light/dark theme with system-theme detection
+- monthly token tracking with per-model details and a local billing estimate
+- independent chat-history clearing and per-conversation deletion
+- multiple persistent maps with a browsable conversation sidebar
+- per-map PDF context for books and papers, uploaded once through the Files API
+- debounced search across map titles, questions, answers, and PDF names
+- collapsible, zoomable concept trees with active-path highlighting
+- vim-style keyboard navigation for nodes, maps, search, and the composer
+- large-answer optimizations: throttled stream painting and `content-visibility`
+
+![Study Lab main view showing a branching conversation](screenshots/main%20view.png)
 
 ## Run locally
 
@@ -59,6 +69,8 @@ Each node stores its parent ID. Clicking a node makes it the active context and 
 
 The complete parent-path conversation is sent with each request. This makes every branch self-contained and avoids coupling local history to provider-side response IDs.
 
+![Using Go deeper to ask a focused follow-up about selected text](screenshots/go%20deeper.png)
+
 ## Multiple maps
 
 Choose **New map** in the header or conversation sidebar to open a blank map. The current map is retained automatically. Use the left **Conversations** sidebar to switch between saved maps; each entry shows its title, node count, and last activity date. Use ✎ to rename a map or × to delete its entire conversation. A custom title remains unchanged as new questions are added; submitting a blank title restores automatic naming. Existing sessions from the original single-map storage format are migrated automatically.
@@ -71,6 +83,8 @@ Use the search field in the conversation sidebar—or press `/` outside an input
 
 The concept-map toolbar can expand or collapse all branches and zoom the tree from 80% to 140%. Individual branches have disclosure arrows, and their collapsed state persists with the map. The current root-to-node path remains highlighted.
 
+![Study Lab tree and conversation navigation](screenshots/tree%20navbar.png)
+
 Vim-style shortcuts work whenever a text field or dialog control is not focused:
 
 - `j` / `k` — next / previous visible concept node
@@ -82,6 +96,8 @@ Vim-style shortcuts work whenever a text field or dialog control is not focused:
 - `i` — focus the question composer
 - `Esc` — leave input or search mode
 - `?` — open the in-app shortcut reference
+
+![In-app reference for Vim-style keyboard shortcuts](screenshots/vim%20shortcuts.png)
 
 ## PDF context
 
@@ -104,6 +120,8 @@ The browser stores these local keys:
 Data saved by releases before the rename is copied into the new storage namespace automatically on first load.
 
 The usage button in the header counts tokens reported by completed Responses API requests made from this browser. Its estimated USD amount uses a local pricing table and is not an invoice: it cannot see other browsers or applications, historical requests made before tracking was added, credits, taxes, or special pricing. Use the linked OpenAI usage dashboard as the source of truth for billing.
+
+![API usage details with token and cost estimates](screenshots/api%20usage.png)
 
 This design is convenient for a private tool on your own laptop, but browser storage is not a secure secret vault. Any JavaScript executing on the same origin can read it. Therefore:
 
