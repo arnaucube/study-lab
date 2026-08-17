@@ -1,9 +1,12 @@
 (() => {
   'use strict';
 
-  const STORAGE_KEY = 'study-pal:v1';
-  const SETTINGS_KEY = 'study-pal:settings:v1';
-  const USAGE_KEY = 'study-pal:usage:v1';
+  const APP_PREFIX = 'study-lab';
+  const STORAGE_KEY = `${APP_PREFIX}:v1`;
+  const SETTINGS_KEY = `${APP_PREFIX}:settings:v1`;
+  const USAGE_KEY = `${APP_PREFIX}:usage:v1`;
+  const TREE_ZOOM_KEY = `${APP_PREFIX}:tree-zoom`;
+  const THEME_KEY = `${APP_PREFIX}:theme`;
   const PDF_REQUEST_LIMIT = 50 * 1024 * 1024;
   // USD per million tokens. Last checked against OpenAI Docs on 2026-08-17.
   const MODEL_PRICES = [
@@ -41,9 +44,12 @@
     usageCached: $('#usage-cached'), usageOutput: $('#usage-output'), usageModels: $('#usage-models'),
     usageRecent: $('#usage-recent'), usageNote: $('#usage-note'), historyList: $('#history-list'),
     historyEmpty: $('#history-empty'), historyToggle: $('#toggle-history'),
-    attachments: $('#attachments'), uploadPDF: $('#upload-pdf'), pdfInput: $('#pdf-input')
+    attachments: $('#attachments'), uploadPDF: $('#upload-pdf'), pdfInput: $('#pdf-input'),
+    conversationSearch: $('#conversation-search'), searchResults: $('#search-results'),
+    treeZoom: $('#tree-zoom'), shortcutsDialog: $('#shortcuts-dialog')
   };
 
+  migrateLegacyStorage();
   let settings = loadJSON(SETTINGS_KEY, DEFAULT_SETTINGS);
   let workspace = loadWorkspace();
   let state = currentMap();
@@ -54,10 +60,29 @@
   let selectedText = null;
   let saveTimer = 0;
   let toastTimer = 0;
+  let searchTimer = 0;
+  let searchIndex = null;
+  let pendingG = false;
+  let pendingGTimer = 0;
+  let treeZoom = loadTreeZoom();
 
   function loadJSON(key, fallback) {
     try { return { ...fallback, ...JSON.parse(localStorage.getItem(key) || '{}') }; }
     catch { return { ...fallback }; }
+  }
+
+  function migrateLegacyStorage() {
+    const legacyPrefix = ['study', 'pal'].join('-');
+    const suffixes = [':v1', ':settings:v1', ':usage:v1', ':theme', ':tree-zoom'];
+    for (const suffix of suffixes) {
+      const currentKey = `${APP_PREFIX}${suffix}`;
+      const legacyKey = `${legacyPrefix}${suffix}`;
+      try {
+        if (localStorage.getItem(currentKey) === null && localStorage.getItem(legacyKey) !== null) {
+          localStorage.setItem(currentKey, localStorage.getItem(legacyKey));
+        }
+      } catch {}
+    }
   }
 
   function loadUsage() {
@@ -67,9 +92,14 @@
     } catch { return []; }
   }
 
+  function loadTreeZoom() {
+    try { return Math.max(.8, Math.min(1.4, Number(localStorage.getItem(TREE_ZOOM_KEY)) || 1)); }
+    catch { return 1; }
+  }
+
   function blankMap() {
     const now = Date.now();
-    return { id: uid(), title: 'Untitled map', titleCustom: false, nodes: [], attachments: [], activeId: null, createdAt: now, updatedAt: now };
+    return { id: uid(), title: 'Untitled map', titleCustom: false, nodes: [], attachments: [], collapsedIds: [], activeId: null, createdAt: now, updatedAt: now };
   }
 
   function titleFromNodes(nodes) {
@@ -94,6 +124,7 @@
       titleCustom: Boolean(value.titleCustom),
       ...normalized,
       attachments,
+      collapsedIds: Array.isArray(value.collapsedIds) ? [...new Set(value.collapsedIds.map(String))] : [],
       createdAt,
       updatedAt: Number(value.updatedAt) || Number(normalized.nodes.at(-1)?.createdAt) || createdAt
     };
@@ -145,7 +176,7 @@
     catch { showToast('Browser storage is full — conversations could not be saved'); return false; }
   }
 
-  function touchMap(map = state) { map.updatedAt = Date.now(); }
+  function touchMap(map = state) { map.updatedAt = Date.now(); searchIndex = null; }
 
   function refreshMapTitle(map = state) {
     if (!map.titleCustom) map.title = titleFromNodes(map.nodes);
@@ -278,19 +309,34 @@
     }
     const roots = grouped.get(null) || [];
     const activePath = new Set(pathTo(state.activeId).map(node => node.id));
+    const collapsed = new Set(state.collapsedIds);
     const build = nodes => {
       const ul = document.createElement('ul');
       for (const node of nodes) {
         const li = document.createElement('li');
+        li.dataset.nodeId = node.id;
+        const wrap = document.createElement('div');
+        wrap.className = 'tree-node-wrap';
         const button = document.createElement('button');
         button.type = 'button';
-        button.className = `tree-node${node.id === state.activeId ? ' active' : ''}`;
+        button.className = `tree-node${node.id === state.activeId ? ' active' : ''}${activePath.has(node.id) ? ' on-path' : ''}`;
         button.dataset.nodeId = node.id;
         button.setAttribute('aria-current', node.id === state.activeId ? 'true' : 'false');
         const children = grouped.get(node.id) || [];
-        button.innerHTML = `<span class="node-dot">${node.status === 'loading' ? '…' : (activePath.has(node.id) ? '●' : '○')}</span><span class="node-copy"><span class="node-title">${escapeHTML(node.question)}</span><span class="node-meta">${children.length} ${children.length === 1 ? 'reply' : 'branches'}</span></span>`;
-        li.append(button);
-        if (children.length) li.append(build(children));
+        const isCollapsed = children.length > 0 && collapsed.has(node.id);
+        const toggle = document.createElement(children.length ? 'button' : 'span');
+        toggle.className = children.length ? 'toggle-subtree' : 'toggle-placeholder';
+        if (children.length) {
+          toggle.type = 'button';
+          toggle.dataset.nodeId = node.id;
+          toggle.setAttribute('aria-label', `${isCollapsed ? 'Expand' : 'Collapse'} branch: ${node.question}`);
+          toggle.setAttribute('aria-expanded', String(!isCollapsed));
+          toggle.textContent = isCollapsed ? '▸' : '▾';
+        }
+        button.innerHTML = `<span class="node-dot">${node.status === 'loading' ? '…' : (activePath.has(node.id) ? '●' : '○')}</span><span class="node-copy"><span class="node-title">${escapeHTML(node.question)}</span><span class="node-meta">${children.length} ${children.length === 1 ? 'reply' : 'branches'}${isCollapsed ? ' · hidden' : ''}</span></span>`;
+        wrap.append(toggle, button);
+        li.append(wrap);
+        if (children.length && !isCollapsed) li.append(build(children));
         ul.append(li);
       }
       return ul;
@@ -302,6 +348,44 @@
     let branchCount = 0;
     for (const children of grouped.values()) branchCount += Math.max(0, children.length - 1);
     els.branchCount.textContent = String(branchCount);
+  }
+
+  function revealNode(map, nodeId) {
+    if (!nodeId) return;
+    const hidden = new Set(map.collapsedIds);
+    for (const node of pathTo(nodeId, map).slice(0, -1)) hidden.delete(node.id);
+    map.collapsedIds = [...hidden];
+  }
+
+  function toggleSubtree(nodeId, force) {
+    if (!nodeById(nodeId)) return;
+    const collapsed = new Set(state.collapsedIds);
+    const shouldCollapse = force ?? !collapsed.has(nodeId);
+    if (shouldCollapse) collapsed.add(nodeId);
+    else collapsed.delete(nodeId);
+    state.collapsedIds = [...collapsed];
+    persistSoon();
+    renderTree();
+  }
+
+  function setAllSubtrees(collapsed) {
+    if (!collapsed) state.collapsedIds = [];
+    else {
+      const parents = new Set(state.nodes.map(node => node.parentId).filter(Boolean));
+      state.collapsedIds = [...parents];
+    }
+    persistSoon();
+    renderTree();
+  }
+
+  function updateTreeZoom(delta = 0) {
+    treeZoom = Math.round(Math.max(.8, Math.min(1.4, treeZoom + delta)) * 10) / 10;
+    els.tree.style.fontSize = `${.76 * treeZoom}rem`;
+    els.tree.style.setProperty('--tree-indent', `${20 * treeZoom}px`);
+    els.tree.style.setProperty('--tree-dot-size', `${17 * treeZoom}px`);
+    els.tree.style.setProperty('--tree-node-pad-y', `${8 * treeZoom}px`);
+    els.treeZoom.textContent = `${Math.round(treeZoom * 100)}%`;
+    try { localStorage.setItem(TREE_ZOOM_KEY, String(treeZoom)); } catch {}
   }
 
   function renderBranchContext() {
@@ -348,6 +432,72 @@
     els.historyList.replaceChildren(fragment);
     els.historyEmpty.hidden = maps.length > 0;
     els.historyList.hidden = maps.length === 0;
+    if (els.conversationSearch.value.trim()) renderSearchResults();
+    else els.searchResults.hidden = true;
+  }
+
+  function buildSearchIndex() {
+    const entries = [];
+    for (const map of workspace.maps) {
+      if (!map.nodes.length && !map.attachments.length) continue;
+      entries.push({ mapId: map.id, nodeId: null, kind: 'Map', label: map.title, fields: [map.title] });
+      for (const node of map.nodes) {
+        entries.push({
+          mapId: map.id, nodeId: node.id, kind: 'Node', label: node.question,
+          fields: [node.question, node.answer || ''], mapTitle: map.title
+        });
+      }
+      for (const file of map.attachments) {
+        entries.push({ mapId: map.id, nodeId: null, kind: 'PDF', label: file.name, fields: [file.name], mapTitle: map.title });
+      }
+    }
+    searchIndex = entries;
+    return entries;
+  }
+
+  function searchExcerpt(fields, expression) {
+    for (const field of fields) {
+      const source = String(field || '').replace(/\s+/g, ' ').trim();
+      const index = source.search(expression);
+      if (index < 0) continue;
+      const start = Math.max(0, index - 45);
+      const end = Math.min(source.length, index + 115);
+      return `${start ? '…' : ''}${source.slice(start, end)}${end < source.length ? '…' : ''}`;
+    }
+    return '';
+  }
+
+  function renderSearchResults() {
+    const query = els.conversationSearch.value.trim();
+    if (!query) {
+      els.searchResults.hidden = true;
+      els.historyList.hidden = false;
+      els.historyEmpty.hidden = workspace.maps.some(map => map.nodes.length || map.attachments.length);
+      return;
+    }
+    const expression = new RegExp(query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i');
+    const matches = [];
+    for (const entry of searchIndex || buildSearchIndex()) {
+      const excerpt = searchExcerpt(entry.fields, expression);
+      if (!excerpt) continue;
+      matches.push({ ...entry, excerpt });
+      if (matches.length >= 60) break;
+    }
+    els.searchResults.innerHTML = matches.length ? matches.map(entry => `
+      <button class="search-result" type="button" data-map-id="${escapeHTML(entry.mapId)}"${entry.nodeId ? ` data-node-id="${escapeHTML(entry.nodeId)}"` : ''}>
+        <span class="search-result-top"><strong>${escapeHTML(entry.label)}</strong><small>${escapeHTML(entry.kind)} · ${escapeHTML(entry.mapTitle || entry.label)}</small></span>
+        <span class="search-excerpt">${escapeHTML(entry.excerpt)}</span>
+      </button>`).join('') : `<p class="search-empty">No results for “${escapeHTML(query)}”.</p>`;
+    els.searchResults.hidden = false;
+    els.historyList.hidden = true;
+    els.historyEmpty.hidden = true;
+  }
+
+  function clearSearch() {
+    clearTimeout(searchTimer);
+    els.conversationSearch.value = '';
+    renderSearchResults();
+    renderHistory();
   }
 
   function formatFileSize(bytes) {
@@ -481,6 +631,7 @@
     const node = { id: uid(), parentId: parentId || null, question, answer: '', status: 'loading', createdAt: Date.now() };
     requestMap.nodes.push(node);
     requestMap.activeId = node.id;
+    revealNode(requestMap, node.id);
     refreshMapTitle(requestMap);
     touchMap(requestMap);
     persistSoon();
@@ -591,7 +742,7 @@
   function toggleTheme() {
     const next = document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark';
     document.documentElement.dataset.theme = next;
-    try { localStorage.setItem('study-pal:theme', next); } catch {}
+    try { localStorage.setItem(THEME_KEY, next); } catch {}
     updateThemeButton();
   }
 
@@ -716,6 +867,7 @@
     if (!existingBlank) workspace.maps.push(map);
     workspace.activeMapId = map.id;
     state = map;
+    els.conversationSearch.value = '';
     persistNow();
     renderAll();
     closeHistoryOnSmallScreen();
@@ -723,16 +875,113 @@
     els.prompt.focus();
   }
 
-  function switchMap(mapId) {
+  function switchMap(mapId, nodeId = null) {
     const map = workspace.maps.find(candidate => candidate.id === mapId);
     if (!map) { closeHistoryOnSmallScreen(); return; }
     workspace.activeMapId = map.id;
     state = map;
-    state.activeId = state.nodes.at(-1)?.id || null;
+    state.activeId = nodeId && nodeById(nodeId, state) ? nodeId : (state.nodes.at(-1)?.id || null);
+    revealNode(state, state.activeId);
     persistSoon();
     hideSelectionMenu();
-    renderAll({ scroll: state.activeId ? 'bottom' : false });
+    renderAll({ scroll: state.activeId ? (nodeId ? true : 'bottom') : false });
     closeHistoryOnSmallScreen();
+  }
+
+  function activateNode(nodeId, scroll = true) {
+    if (!nodeById(nodeId)) return;
+    state.activeId = nodeId;
+    revealNode(state, nodeId);
+    persistSoon();
+    renderAll({ scroll });
+    document.body.classList.remove('map-open');
+  }
+
+  function visibleTreeNodeIds() {
+    return [...els.tree.querySelectorAll('.tree-node')].map(button => button.dataset.nodeId);
+  }
+
+  function moveVisibleNode(offset) {
+    const ids = visibleTreeNodeIds();
+    if (!ids.length) return;
+    const current = Math.max(0, ids.indexOf(state.activeId));
+    activateNode(ids[Math.max(0, Math.min(ids.length - 1, current + offset))]);
+  }
+
+  function moveMap(offset) {
+    const maps = workspace.maps
+      .filter(map => map.nodes.length || map.attachments.length)
+      .sort((a, b) => b.updatedAt - a.updatedAt);
+    if (!maps.length) return;
+    const current = Math.max(0, maps.findIndex(map => map.id === state.id));
+    switchMap(maps[Math.max(0, Math.min(maps.length - 1, current + offset))].id);
+  }
+
+  function focusConversationSearch() {
+    document.body.classList.remove('history-collapsed', 'map-open');
+    if (matchMedia('(max-width: 1100px)').matches) document.body.classList.add('history-open');
+    updateHistoryToggle();
+    els.conversationSearch.focus();
+    els.conversationSearch.select();
+  }
+
+  function handleVimNavigation(event) {
+    if (event.defaultPrevented || event.ctrlKey || event.metaKey || event.altKey) return;
+    const editable = event.target.closest?.('input, textarea, select, [contenteditable="true"]');
+    if (editable) {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        if (editable === els.conversationSearch) clearSearch();
+        editable.blur();
+      }
+      return;
+    }
+    if ($('dialog[open]')) return;
+    if (pendingG && event.key !== 'g') {
+      clearTimeout(pendingGTimer);
+      pendingG = false;
+    }
+    if (event.key === '?') { event.preventDefault(); els.shortcutsDialog.showModal(); return; }
+    if (event.key === '/') { event.preventDefault(); focusConversationSearch(); return; }
+    if (event.key === 'i') { event.preventDefault(); els.prompt.focus(); return; }
+    if (event.key === 'j') { event.preventDefault(); moveVisibleNode(1); return; }
+    if (event.key === 'k') { event.preventDefault(); moveVisibleNode(-1); return; }
+    if (event.key === 'J') { event.preventDefault(); moveMap(1); return; }
+    if (event.key === 'K') { event.preventDefault(); moveMap(-1); return; }
+    if (event.key === 'h') {
+      const parentId = nodeById(state.activeId)?.parentId;
+      if (parentId) { event.preventDefault(); activateNode(parentId); }
+      return;
+    }
+    if (event.key === 'l') {
+      const children = childrenOf(state.activeId);
+      if (!children.length) return;
+      event.preventDefault();
+      if (state.collapsedIds.includes(state.activeId)) toggleSubtree(state.activeId, false);
+      else activateNode(children[0].id);
+      return;
+    }
+    if (event.key === ' ') {
+      if (childrenOf(state.activeId).length) { event.preventDefault(); toggleSubtree(state.activeId); }
+      return;
+    }
+    if (event.key === 'G') {
+      const ids = visibleTreeNodeIds();
+      if (ids.length) { event.preventDefault(); activateNode(ids.at(-1)); }
+      return;
+    }
+    if (event.key === 'g') {
+      event.preventDefault();
+      if (pendingG) {
+        clearTimeout(pendingGTimer);
+        pendingG = false;
+        const ids = visibleTreeNodeIds();
+        if (ids.length) activateNode(ids[0]);
+      } else {
+        pendingG = true;
+        pendingGTimer = setTimeout(() => { pendingG = false; }, 900);
+      }
+    }
   }
 
   function closeHistoryOnSmallScreen() {
@@ -762,6 +1011,8 @@
     const map = blankMap();
     workspace = { version: 2, maps: [map], activeMapId: map.id };
     state = map;
+    searchIndex = null;
+    els.conversationSearch.value = '';
     persistNow();
     renderAll();
     showToast('All conversations cleared');
@@ -777,6 +1028,7 @@
     if (activeRequest && map.nodes.some(node => node.status === 'loading')) activeRequest.abort();
 
     workspace.maps = workspace.maps.filter(candidate => candidate.id !== map.id);
+    searchIndex = null;
     if (!workspace.maps.length) workspace.maps.push(blankMap());
     if (state === map) {
       const next = [...workspace.maps]
@@ -785,6 +1037,7 @@
       workspace.activeMapId = next.id;
       state = next;
       state.activeId = state.nodes.at(-1)?.id || null;
+      revealNode(state, state.activeId);
     }
     persistNow();
     renderAll({ scroll: state.activeId ? 'bottom' : false });
@@ -843,14 +1096,23 @@
     if (starter) { els.prompt.value = starter.dataset.prompt; els.prompt.focus(); }
     const historyItem = event.target.closest('.history-item');
     if (historyItem) { switchMap(historyItem.dataset.mapId); return; }
+    const searchResult = event.target.closest('.search-result');
+    if (searchResult) {
+      const { mapId, nodeId } = searchResult.dataset;
+      clearSearch();
+      switchMap(mapId, nodeId || null);
+      return;
+    }
     const renameConversation = event.target.closest('.rename-map');
     if (renameConversation) { renameMap(renameConversation.dataset.mapId); return; }
     const deleteConversation = event.target.closest('.delete-map');
     if (deleteConversation) { deleteMap(deleteConversation.dataset.mapId); return; }
     const removeFile = event.target.closest('.remove-attachment');
     if (removeFile) { removeAttachment(removeFile.dataset.fileId); return; }
+    const subtreeToggle = event.target.closest('.toggle-subtree');
+    if (subtreeToggle) { toggleSubtree(subtreeToggle.dataset.nodeId); return; }
     const treeNode = event.target.closest('.tree-node');
-    if (treeNode) { state.activeId = treeNode.dataset.nodeId; persistSoon(); renderAll({ scroll: true }); document.body.classList.remove('map-open'); }
+    if (treeNode) { activateNode(treeNode.dataset.nodeId); return; }
     const branch = event.target.closest('.branch-here');
     if (branch) { state.activeId = branch.closest('.message').dataset.nodeId; persistSoon(); renderAll(); els.prompt.focus(); }
     const retry = event.target.closest('.retry-node');
@@ -891,12 +1153,27 @@
   $('#open-usage').addEventListener('click', openUsage);
   $('#theme-toggle').addEventListener('click', toggleTheme);
   $('#toggle-history').addEventListener('click', toggleHistory);
-  $('#study-pal-home').addEventListener('click', event => { event.preventDefault(); createNewMap(); });
+  els.conversationSearch.addEventListener('input', () => {
+    clearTimeout(searchTimer);
+    searchTimer = setTimeout(renderSearchResults, 110);
+  });
+  els.conversationSearch.addEventListener('keydown', event => {
+    if (event.key !== 'Enter') return;
+    const first = $('.search-result', els.searchResults);
+    if (first) { event.preventDefault(); first.click(); }
+  });
+  $('#study-lab-home').addEventListener('click', event => { event.preventDefault(); createNewMap(); });
   $('#new-map-sidebar').addEventListener('click', createNewMap);
   els.uploadPDF.addEventListener('click', () => els.pdfInput.click());
   els.pdfInput.addEventListener('change', () => uploadPDFs(els.pdfInput.files));
   $('#close-settings').addEventListener('click', () => els.settings.close());
   $('#close-usage').addEventListener('click', () => els.usageDialog.close());
+  $('#open-shortcuts').addEventListener('click', () => els.shortcutsDialog.showModal());
+  $('#close-shortcuts').addEventListener('click', () => els.shortcutsDialog.close());
+  $('#expand-all-nodes').addEventListener('click', () => setAllSubtrees(false));
+  $('#collapse-all-nodes').addEventListener('click', () => setAllSubtrees(true));
+  $('#zoom-out-tree').addEventListener('click', () => updateTreeZoom(-.1));
+  $('#zoom-in-tree').addEventListener('click', () => updateTreeZoom(.1));
   $('#reset-usage').addEventListener('click', () => {
     if (!usageRecords.length || confirm('Reset the locally tracked API usage history? This cannot be undone.')) {
       usageRecords = [];
@@ -915,15 +1192,18 @@
   });
   $('#forget-key').addEventListener('click', () => { settings.apiKey = ''; els.apiKey.value = ''; localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings)); updateKeyStatus(); showToast('API key removed'); });
   $('#clear-history').addEventListener('click', () => clearChatHistory());
-  $('#clear-branch').addEventListener('click', () => { state.activeId = state.nodes.at(-1)?.id || null; persistSoon(); renderAll({ scroll: true }); });
+  $('#clear-branch').addEventListener('click', () => { state.activeId = state.nodes.at(-1)?.id || null; revealNode(state, state.activeId); persistSoon(); renderAll({ scroll: true }); });
   $('#collapse-map').addEventListener('click', () => { document.body.classList.remove('map-open'); document.body.classList.add('map-collapsed'); $('#expand-map').hidden = false; });
   $('#expand-map').addEventListener('click', () => { document.body.classList.remove('map-collapsed', 'history-open'); document.body.classList.add('map-open'); $('#expand-map').hidden = true; updateHistoryToggle(); });
   addEventListener('resize', updateHistoryToggle, { passive: true });
+  document.addEventListener('keydown', handleVimNavigation);
 
   updateKeyStatus();
   updateThemeButton();
   updateUsageButton();
   updateHistoryToggle();
+  updateTreeZoom();
   state.activeId = state.nodes.at(-1)?.id || null;
+  revealNode(state, state.activeId);
   renderAll({ scroll: state.activeId ? 'bottom' : false });
 })();

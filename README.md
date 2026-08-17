@@ -1,6 +1,6 @@
-# Study Pal
+# Study Lab
 
-Study Pal is a local-first, branching AI chat for exploring technical concepts. Every question becomes a node in a concept map. Select any earlier node to continue from that point, or select text inside an answer and ask a focused follow-up.
+Study Lab is a local-first, branching AI chat for exploring technical concepts. Every question becomes a node in a concept map. Select any earlier node to continue from that point, or select text inside an answer and ask a focused follow-up.
 
 The app is intentionally frontend-only: there is no build step, package manager, backend, or database. Conversations and settings persist in the browser's `localStorage`, while responses stream directly from OpenAI's Responses API.
 
@@ -19,6 +19,9 @@ The app is intentionally frontend-only: there is no build step, package manager,
 - Independent chat-history clearing and per-conversation deletion
 - Multiple persistent maps with a browsable conversation sidebar
 - Per-map PDF context for books and papers, uploaded once through the Files API
+- Debounced search across map titles, questions, answers, and PDF names
+- Collapsible, zoomable concept trees with active-path highlighting
+- Vim-style keyboard navigation for nodes, maps, search, and the composer
 - Large-answer optimizations: throttled stream painting and `content-visibility`
 
 ## Run locally
@@ -62,6 +65,24 @@ Choose **New map** in the header or conversation sidebar to open a blank map. Th
 
 **Settings → Clear chat history** is the explicit destructive action that removes all saved maps. It does not remove the API key, other settings, or the separate API-usage ledger.
 
+## Search and navigation
+
+Use the search field in the conversation sidebar—or press `/` outside an input—to search all saved map titles, questions, answers, and PDF names. Results link directly to the matching map or question node. Search is debounced and capped at 60 displayed results to keep large workspaces responsive.
+
+The concept-map toolbar can expand or collapse all branches and zoom the tree from 80% to 140%. Individual branches have disclosure arrows, and their collapsed state persists with the map. The current root-to-node path remains highlighted.
+
+Vim-style shortcuts work whenever a text field or dialog control is not focused:
+
+- `j` / `k` — next / previous visible concept node
+- `h` / `l` — parent / first child; `l` expands a collapsed active node first
+- `gg` / `G` — first / last visible node
+- `J` / `K` — next / previous conversation
+- `Space` — collapse or expand the active node
+- `/` — focus cross-conversation search
+- `i` — focus the question composer
+- `Esc` — leave input or search mode
+- `?` — open the in-app shortcut reference
+
 ## PDF context
 
 PDFs are uploaded directly from the browser to the Files endpoint derived from the configured Responses API URL. Only their file IDs, names, and sizes are stored in `localStorage`; the PDF bytes are not copied into browser storage. Page images use low visual detail to reduce token use, while extracted PDF text remains available to the model. Use a vision-capable model that supports PDF inputs.
@@ -72,11 +93,15 @@ Removing a PDF chip or clearing local chat history detaches the file locally but
 
 ## Storage and security
 
-The browser stores three local keys:
+The browser stores these local keys:
 
-- `study-pal:v1` — multi-map conversation workspace, PDF file references, and active-map selection
-- `study-pal:settings:v1` — API key, model, endpoint, and system instructions
-- `study-pal:usage:v1` — token usage and estimated request costs recorded by this browser
+- `study-lab:v1` — multi-map conversation workspace, PDF file references, collapsed branches, and active-map selection
+- `study-lab:settings:v1` — API key, model, endpoint, and system instructions
+- `study-lab:usage:v1` — token usage and estimated request costs recorded by this browser
+- `study-lab:theme` — light/dark theme preference
+- `study-lab:tree-zoom` — concept-map zoom preference
+
+Data saved by releases before the rename is copied into the new storage namespace automatically on first load.
 
 The usage button in the header counts tokens reported by completed Responses API requests made from this browser. Its estimated USD amount uses a local pricing table and is not an invoice: it cannot see other browsers or applications, historical requests made before tracking was added, credits, taxes, or special pricing. Use the linked OpenAI usage dashboard as the source of truth for billing.
 

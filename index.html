@@ -4,10 +4,14 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="color-scheme" content="light dark">
-  <title>Study Pal — Branch your thinking</title>
+  <title>Study Lab — Branch your thinking</title>
   <script>
     try {
-      document.documentElement.dataset.theme = localStorage.getItem('study-pal:theme') ||
+      const themeKey = 'study-lab:theme';
+      const legacyThemeKey = `${['study', 'pal'].join('-')}:theme`;
+      const savedTheme = localStorage.getItem(themeKey) || localStorage.getItem(legacyThemeKey);
+      if (!localStorage.getItem(themeKey) && savedTheme) localStorage.setItem(themeKey, savedTheme);
+      document.documentElement.dataset.theme = savedTheme ||
         (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
     } catch { document.documentElement.dataset.theme = 'light'; }
   </script>
@@ -19,12 +23,16 @@
   <header class="topbar">
     <div class="brand-group">
       <button id="toggle-history" class="history-toggle" type="button" aria-label="Toggle conversations sidebar" aria-expanded="true">☰</button>
-      <a id="study-pal-home" class="brand" href="#" aria-label="Open a new map">
+      <a id="study-lab-home" class="brand" href="#" aria-label="Open a new map">
         <span class="brand-mark" aria-hidden="true">S</span>
-        <span>Study Pal</span>
+        <span>Study Lab</span>
       </a>
     </div>
     <div class="top-actions">
+      <a class="github-button" href="https://github.com/arnaucube/study-lab" target="_blank" rel="noopener noreferrer" aria-label="Open Study Lab on GitHub" title="View source on GitHub">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 .7a11.5 11.5 0 0 0-3.64 22.41c.58.1.79-.25.79-.56v-2.23c-3.22.7-3.9-1.37-3.9-1.37-.53-1.34-1.29-1.7-1.29-1.7-1.05-.72.08-.71.08-.71 1.16.08 1.78 1.2 1.78 1.2 1.04 1.77 2.72 1.26 3.38.96.1-.75.4-1.26.74-1.55-2.57-.29-5.27-1.28-5.27-5.68 0-1.26.45-2.28 1.19-3.09-.12-.29-.52-1.46.11-3.05 0 0 .97-.31 3.16 1.18a10.96 10.96 0 0 1 5.76 0c2.19-1.49 3.16-1.18 3.16-1.18.63 1.59.23 2.76.11 3.05.74.81 1.19 1.83 1.19 3.09 0 4.41-2.71 5.38-5.29 5.67.42.36.79 1.06.79 2.14v3.17c0 .31.21.67.8.56A11.5 11.5 0 0 0 12 .7Z"/></svg>
+      </a>
+      <button id="open-shortcuts" class="vim-shortcuts-button" type="button" aria-label="Show Vim navigation shortcuts" title="Vim navigation shortcuts">Vim shortcuts</button>
       <button id="open-usage" class="usage-button" type="button" aria-haspopup="dialog" aria-label="Open API usage details">
         <span id="month-tokens">0</span> <span class="usage-caption">tokens</span>
       </button>
@@ -47,6 +55,12 @@
         </div>
       </div>
       <button id="new-map-sidebar" class="new-map-sidebar" type="button"><span aria-hidden="true">＋</span> New map</button>
+      <label class="history-search" for="conversation-search">
+        <span aria-hidden="true">⌕</span>
+        <input id="conversation-search" type="search" placeholder="Search conversations…" autocomplete="off" spellcheck="false">
+        <kbd>/</kbd>
+      </label>
+      <div id="search-results" class="search-results" aria-live="polite" hidden></div>
       <nav id="history-list" class="history-list" aria-label="Saved conversations"></nav>
       <p id="history-empty" class="history-empty" hidden>No saved conversations yet.</p>
       <p class="history-storage"><span aria-hidden="true">●</span> Stored in this browser</p>
@@ -55,7 +69,7 @@
     <section class="workspace" aria-label="Conversation">
       <div id="welcome" class="welcome">
         <div class="eyebrow">A thinking space that branches</div>
-        <h1>Follow every<br><em>line of thought.</em></h1>
+        <h1>StudyLab - Follow every<br><em>line of thought.</em></h1>
         <p>Ask a question, explore the answer, then branch from any earlier idea without losing your way.</p>
         <div class="starter-grid" aria-label="Example questions">
           <button class="starter" data-prompt="Explain and prove the Tower Law for finite field extensions K ⊆ F ⊆ L. Show how bases compose, then work through the example Q ⊆ Q(√2) ⊆ Q(√2, √3) and relate it to Galois theory.">
@@ -110,6 +124,14 @@
         <button id="collapse-map" class="icon-button" type="button" aria-label="Collapse concept map">→</button>
       </div>
       <p id="map-help" class="map-help">Select a node to revisit it and start a new branch.</p>
+      <div class="map-toolbar" aria-label="Concept map controls">
+        <button id="expand-all-nodes" type="button" title="Expand all branches">Expand</button>
+        <button id="collapse-all-nodes" type="button" title="Collapse all branches">Collapse</button>
+        <span class="map-toolbar-spacer"></span>
+        <button id="zoom-out-tree" type="button" aria-label="Zoom concept map out">−</button>
+        <output id="tree-zoom" aria-label="Concept map zoom">100%</output>
+        <button id="zoom-in-tree" type="button" aria-label="Zoom concept map in">+</button>
+      </div>
       <nav id="tree" class="tree" aria-label="Question branches"></nav>
       <div id="map-empty" class="map-empty">
         <span class="empty-orbit">✦</span>
@@ -131,6 +153,7 @@
     <blockquote id="selection-preview"></blockquote>
     <select id="selection-action" aria-label="Question type">
       <option value="Explain this passage in simpler terms.">Explain simply</option>
+      <option value="What is">What is</option>
       <option value="Go deeper into this idea and its implications.">Go deeper</option>
       <option value="Give me a concrete example of this.">Give an example</option>
       <option value="What assumptions does this passage make?">Challenge assumptions</option>
@@ -233,6 +256,30 @@
         <a class="button button-ghost usage-dashboard" href="https://platform.openai.com/usage" target="_blank" rel="noopener noreferrer">Official dashboard ↗</a>
         <button class="button button-dark" value="close" type="submit">Done</button>
       </div>
+    </form>
+  </dialog>
+
+  <dialog id="shortcuts-dialog" class="settings-dialog shortcuts-dialog">
+    <form method="dialog">
+      <div class="dialog-heading">
+        <div>
+          <span class="eyebrow">Navigation</span>
+          <h2>Keyboard shortcuts</h2>
+        </div>
+        <button id="close-shortcuts" class="icon-button" type="button" aria-label="Close keyboard shortcuts">×</button>
+      </div>
+      <div class="shortcut-list">
+        <span><kbd>j</kbd> / <kbd>k</kbd></span><span>Next / previous visible node</span>
+        <span><kbd>h</kbd> / <kbd>l</kbd></span><span>Parent / first child or expand</span>
+        <span><kbd>g</kbd> <kbd>g</kbd> / <kbd>G</kbd></span><span>First / last visible node</span>
+        <span><kbd>J</kbd> / <kbd>K</kbd></span><span>Next / previous conversation</span>
+        <span><kbd>/</kbd></span><span>Search all conversations</span>
+        <span><kbd>i</kbd></span><span>Focus the question composer</span>
+        <span><kbd>Space</kbd></span><span>Collapse or expand the active branch</span>
+        <span><kbd>Esc</kbd></span><span>Leave search or input mode</span>
+        <span><kbd>?</kbd></span><span>Show this shortcut reference</span>
+      </div>
+      <div class="dialog-actions"><button class="button button-dark" value="close" type="submit">Done</button></div>
     </form>
   </dialog>
 
