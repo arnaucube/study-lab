@@ -1,0 +1,6 @@
+implement a webapp where I can configure my OpenAI/ChatGPT credentials/token and I can chat with the AI, but each question appears on a right panel as a node, and I can click on any node and start a new branch asking questions from that node. This will be useful to explore technical concepts and going back to continue from a previous conccept.
+Also, I want to be able to select part of the text, and then a drop-down menu allows me to ask a question about that text, which will trigger also an answer from the LLM if the button 'ask' is hitten.
+Ideally we do this without a backend, but if you need a backend to implement this, do it either in Go or in Rust. The frontend of the webapp must be in vanilla javascript + html + css, and with performance in mind. Also it must support LaTeX rendering, since most of the answers will contain LaTeX equations.
+Session must prevail, store it either on localstorage of the browser, or if we use a backend, store it on a SQLite database.
+Must be able to run this locally in my laptop. And again, performance is important; the rendered text will become large, and want to be able to run it on low-end laptops.
+Also add instructions on how to run it at the README.md.

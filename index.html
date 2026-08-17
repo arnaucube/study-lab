@@ -1,0 +1,163 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <title>Study Pal — Branch your thinking</title>
+  <script>
+    try {
+      document.documentElement.dataset.theme = localStorage.getItem('study-pal:theme') ||
+        (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
+    } catch { document.documentElement.dataset.theme = 'light'; }
+  </script>
+  <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.22/dist/katex.min.css">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <header class="topbar">
+    <a class="brand" href="#" aria-label="Study Pal home">
+      <span class="brand-mark" aria-hidden="true">S</span>
+      <span>Study Pal</span>
+    </a>
+    <div class="top-actions">
+      <button id="theme-toggle" class="theme-toggle" type="button" aria-label="Switch to dark theme" title="Switch theme">
+        <span aria-hidden="true">☾</span>
+      </button>
+      <button id="new-session" class="button button-ghost" type="button">New map</button>
+      <button id="open-settings" class="button button-dark" type="button" aria-haspopup="dialog">
+        <span class="status-dot" id="key-status" aria-hidden="true"></span>
+        Settings
+      </button>
+    </div>
+  </header>
+
+  <main class="app-shell">
+    <section class="workspace" aria-label="Conversation">
+      <div id="welcome" class="welcome">
+        <div class="eyebrow">A thinking space that branches</div>
+        <h1>Follow every<br><em>line of thought.</em></h1>
+        <p>Ask a question, explore the answer, then branch from any earlier idea without losing your way.</p>
+        <div class="starter-grid" aria-label="Example questions">
+          <button class="starter" data-prompt="Explain gradient descent visually and mathematically.">
+            <span class="starter-icon">↘</span>
+            <strong>Learn a concept</strong>
+            <small>Explain gradient descent visually</small>
+          </button>
+          <button class="starter" data-prompt="Compare TCP and UDP with practical examples.">
+            <span class="starter-icon">⇄</span>
+            <strong>Compare ideas</strong>
+            <small>When should I use TCP or UDP?</small>
+          </button>
+          <button class="starter" data-prompt="Derive the quadratic formula step by step using LaTeX.">
+            <span class="starter-icon">∑</span>
+            <strong>Work through math</strong>
+            <small>Derive the quadratic formula</small>
+          </button>
+        </div>
+      </div>
+
+      <div id="conversation" class="conversation" aria-live="polite"></div>
+
+      <div class="composer-wrap">
+        <div id="branch-context" class="branch-context" hidden>
+          <span>Branching from <strong id="branch-label"></strong></span>
+          <button id="clear-branch" type="button" aria-label="Return to latest node">×</button>
+        </div>
+        <form id="composer" class="composer">
+          <textarea id="prompt" rows="1" placeholder="Ask anything…" aria-label="Message" maxlength="30000"></textarea>
+          <div class="composer-footer">
+            <span class="hint"><kbd>Enter</kbd> send · <kbd>Shift</kbd> + <kbd>Enter</kbd> new line</span>
+            <button id="send" class="send" type="submit" aria-label="Send message">↑</button>
+          </div>
+        </form>
+        <p class="privacy-note">Your map stays in this browser.</p>
+      </div>
+    </section>
+
+    <aside class="map-panel" aria-label="Concept map">
+      <div class="map-heading">
+        <div>
+          <span class="eyebrow">Your exploration</span>
+          <h2>Concept map</h2>
+        </div>
+        <button id="collapse-map" class="icon-button" type="button" aria-label="Collapse concept map">→</button>
+      </div>
+      <p id="map-help" class="map-help">Select a node to revisit it and start a new branch.</p>
+      <nav id="tree" class="tree" aria-label="Question branches"></nav>
+      <div id="map-empty" class="map-empty">
+        <span class="empty-orbit">✦</span>
+        <p>Your questions will grow into a map here.</p>
+      </div>
+      <div class="map-stats">
+        <span><strong id="node-count">0</strong> nodes</span>
+        <span><strong id="branch-count">0</strong> branches</span>
+      </div>
+    </aside>
+    <button id="expand-map" class="expand-map" type="button" hidden>← Concept map</button>
+  </main>
+
+  <div id="selection-menu" class="selection-menu" role="dialog" aria-label="Ask about selected text" hidden>
+    <div class="selection-topline">
+      <span>Ask about selection</span>
+      <button id="close-selection" type="button" aria-label="Close">×</button>
+    </div>
+    <blockquote id="selection-preview"></blockquote>
+    <select id="selection-action" aria-label="Question type">
+      <option value="Explain this passage in simpler terms.">Explain simply</option>
+      <option value="Go deeper into this idea and its implications.">Go deeper</option>
+      <option value="Give me a concrete example of this.">Give an example</option>
+      <option value="What assumptions does this passage make?">Challenge assumptions</option>
+      <option value="custom">Write my own…</option>
+    </select>
+    <textarea id="selection-custom" rows="2" placeholder="What would you like to ask?" hidden></textarea>
+    <button id="ask-selection" class="button button-dark" type="button">Ask</button>
+  </div>
+
+  <dialog id="settings-dialog" class="settings-dialog">
+    <form id="settings-form" method="dialog">
+      <div class="dialog-heading">
+        <div>
+          <span class="eyebrow">Connection</span>
+          <h2>API settings</h2>
+        </div>
+        <button id="close-settings" class="icon-button" type="button" aria-label="Close settings">×</button>
+      </div>
+      <p class="settings-copy">Use an OpenAI API key (not a ChatGPT password). It is stored only in this browser and sent directly to the configured API.</p>
+      <label>
+        API key
+        <div class="secret-field">
+          <input id="api-key" type="password" placeholder="sk-…" autocomplete="off" spellcheck="false">
+          <button id="toggle-key" type="button" aria-label="Show API key">Show</button>
+        </div>
+      </label>
+      <label>
+        Model
+        <input id="model" type="text" value="gpt-5-mini" placeholder="gpt-5-mini" spellcheck="false">
+      </label>
+      <details>
+        <summary>Advanced</summary>
+        <label>
+          Responses API endpoint
+          <input id="api-url" type="url" value="https://api.openai.com/v1/responses" spellcheck="false">
+        </label>
+        <label>
+          System instructions
+          <textarea id="system-prompt" rows="3">You are a patient technical tutor. Use clear Markdown and LaTeX where useful. Build on the conversation context and explain assumptions.</textarea>
+        </label>
+      </details>
+      <div class="security-callout"><strong>Local-use note</strong> — any script running on this origin can access local storage. Use a restricted project key and never deploy this frontend publicly with a saved key.</div>
+      <div class="dialog-actions">
+        <button id="forget-key" class="button button-ghost danger" type="button">Forget key</button>
+        <button class="button button-dark" value="save" type="submit">Save settings</button>
+      </div>
+    </form>
+  </dialog>
+
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
+
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.22/dist/katex.min.js"></script>
+  <script defer src="app.js"></script>
+</body>
+</html>
