@@ -153,6 +153,13 @@ body.history-collapsed .workspace { margin-left: 0; }
 .answer-body pre code { background: none; padding: 0; font-size: .84rem; }
 .answer-body blockquote { border-left: 3px solid var(--sage); margin-left: 0; padding-left: 15px; color: var(--muted); }
 .answer-body a { color: var(--sage-dark); text-underline-offset: 3px; }
+.answer-body .table-scroll { max-width: 100%; margin: 0 0 1em; overflow-x: auto; border: 1px solid var(--line); border-radius: 10px; }
+.answer-body table { width: 100%; border-collapse: collapse; background: rgba(255,255,255,.45); font-size: .92em; overflow-wrap: normal; }
+.answer-body th, .answer-body td { padding: 9px 12px; border-right: 1px solid var(--line); border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; }
+.answer-body th:last-child, .answer-body td:last-child { border-right: 0; }
+.answer-body tbody tr:last-child td { border-bottom: 0; }
+.answer-body th { background: #e5e9e4; color: var(--ink); font-weight: 750; }
+.answer-body tbody tr:nth-child(even) { background: rgba(230,233,227,.46); }
 .answer-body .katex-display { overflow-x: auto; overflow-y: hidden; padding: 5px 0; }
 .answer-attribution { display: flex; align-items: baseline; gap: 6px; min-width: 0; margin-top: 8px; color: var(--muted); line-height: 1.2; }
 .answer-attribution span { overflow: hidden; font-size: .65rem; font-weight: 650; text-overflow: ellipsis; white-space: nowrap; }

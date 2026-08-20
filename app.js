@@ -291,6 +291,47 @@
     return output;
   }
 
+  function tableCells(line) {
+    let source = line.trim();
+    if (source.startsWith('|')) source = source.slice(1);
+    if (source.endsWith('|') && !source.endsWith('\\|')) source = source.slice(0, -1);
+    const cells = [];
+    let cell = '';
+    let code = false;
+    for (let index = 0; index < source.length; index += 1) {
+      const char = source[index];
+      if (char === '\\' && source[index + 1] === '|') {
+        cell += '|';
+        index += 1;
+      } else if (char === '`') {
+        code = !code;
+        cell += char;
+      } else if (char === '|' && !code) {
+        cells.push(cell.trim());
+        cell = '';
+      } else cell += char;
+    }
+    cells.push(cell.trim());
+    return cells;
+  }
+
+  function tableDelimiter(line) {
+    const cells = tableCells(line);
+    if (!line.includes('|') || !cells.length || cells.some(cell => !/^:?-{3,}:?$/.test(cell))) return null;
+    return cells.map(cell => cell.startsWith(':') && cell.endsWith(':') ? 'center' : cell.endsWith(':') ? 'right' : cell.startsWith(':') ? 'left' : '');
+  }
+
+  function renderTable(header, alignments, rows) {
+    const cellHTML = (cell, tag, index) => {
+      const alignment = alignments[index] ? ` style="text-align: ${alignments[index]}"` : '';
+      const scope = tag === 'th' ? ' scope="col"' : '';
+      return `<${tag}${scope}${alignment}>${inlineMarkdown(cell || '')}</${tag}>`;
+    };
+    const head = header.map((cell, index) => cellHTML(cell, 'th', index)).join('');
+    const body = rows.map(row => `<tr>${header.map((_, index) => cellHTML(row[index], 'td', index)).join('')}</tr>`).join('');
+    return `<div class="table-scroll"><table><thead><tr>${head}</tr></thead>${body ? `<tbody>${body}</tbody>` : ''}</table></div>`;
+  }
+
   function renderMath(source, displayMode) {
     if (!globalThis.katex) return `<code class="math-fallback">${escapeHTML(source)}</code>`;
     try { return katex.renderToString(source, { displayMode, throwOnError: false, strict: false, trust: false }); }
@@ -317,7 +358,24 @@
     };
     const closeList = () => { if (list) html.push(`</${list}>`); list = null; };
 
-    for (const line of lines) {
+    for (let lineIndex = 0; lineIndex < lines.length; lineIndex += 1) {
+      const line = lines[lineIndex];
+      const alignments = lineIndex + 1 < lines.length ? tableDelimiter(lines[lineIndex + 1]) : null;
+      if (alignments) {
+        const header = tableCells(line);
+        if (header.length === alignments.length) {
+          flushParagraph(); closeList();
+          const rows = [];
+          lineIndex += 2;
+          while (lineIndex < lines.length && lines[lineIndex].trim() && lines[lineIndex].includes('|')) {
+            rows.push(tableCells(lines[lineIndex]));
+            lineIndex += 1;
+          }
+          html.push(renderTable(header, alignments, rows));
+          lineIndex -= 1;
+          continue;
+        }
+      }
       const heading = line.match(/^(#{1,3})\s+(.+)/);
       const bullet = line.match(/^\s*[-*+]\s+(.+)/);
       const numbered = line.match(/^\s*\d+[.)]\s+(.+)/);
