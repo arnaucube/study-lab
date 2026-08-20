@@ -5,9 +5,21 @@
   const STORAGE_KEY = `${APP_PREFIX}:v1`;
   const SETTINGS_KEY = `${APP_PREFIX}:settings:v1`;
   const USAGE_KEY = `${APP_PREFIX}:usage:v1`;
+  const OPENROUTER_PRICES_KEY = `${APP_PREFIX}:openrouter-prices:v1`;
   const TREE_ZOOM_KEY = `${APP_PREFIX}:tree-zoom`;
   const THEME_KEY = `${APP_PREFIX}:theme`;
   const PDF_REQUEST_LIMIT = 50 * 1024 * 1024;
+  const PRICE_CACHE_TTL = 24 * 60 * 60 * 1000;
+  const PROVIDERS = {
+    openai: {
+      label: 'OpenAI', apiUrl: 'https://api.openai.com/v1/responses', model: 'gpt-5-mini',
+      models: ['gpt-5-mini', 'gpt-5', 'gpt-4.1-mini', 'gpt-4.1']
+    },
+    openrouter: {
+      label: 'OpenRouter', apiUrl: 'https://openrouter.ai/api/v1/responses', model: 'openai/gpt-5-mini',
+      models: ['openai/gpt-5-mini', 'anthropic/claude-sonnet-4', 'google/gemini-2.5-pro', 'deepseek/deepseek-r1']
+    }
+  };
   // USD per million tokens. Last checked against OpenAI Docs on 2026-08-17.
   const MODEL_PRICES = [
     { match: /^gpt-5\.6-terra(?:-|$)/, input: 2, cached: .2, output: 12 },
@@ -24,9 +36,14 @@
     { match: /^gpt-4o-mini(?:-|$)/, input: .15, cached: .075, output: .6 }
   ];
   const DEFAULT_SETTINGS = {
+    provider: 'openai',
     apiKey: '',
     model: 'gpt-5-mini',
     apiUrl: 'https://api.openai.com/v1/responses',
+    profiles: {
+      openai: { apiKey: '', model: 'gpt-5-mini', apiUrl: 'https://api.openai.com/v1/responses' },
+      openrouter: { apiKey: '', model: 'openai/gpt-5-mini', apiUrl: 'https://openrouter.ai/api/v1/responses' }
+    },
     systemPrompt: 'You are a patient technical tutor. Use clear Markdown and LaTeX where useful. Use mathematical language, assume graduate level knowledge. Build on the conversation context and explain assumptions.'
   };
 
@@ -37,23 +54,29 @@
     nodeCount: $('#node-count'), branchCount: $('#branch-count'), branchContext: $('#branch-context'),
     branchLabel: $('#branch-label'), selectionMenu: $('#selection-menu'), selectionPreview: $('#selection-preview'),
     selectionAction: $('#selection-action'), selectionCustom: $('#selection-custom'), settings: $('#settings-dialog'),
-    apiKey: $('#api-key'), model: $('#model'), apiUrl: $('#api-url'), systemPrompt: $('#system-prompt'),
+    provider: $('#provider'), openaiApiKey: $('#openai-api-key'), openrouterApiKey: $('#openrouter-api-key'),
+    openaiModel: $('#openai-model'), openrouterModel: $('#openrouter-model'),
+    openaiModelOptions: $('#openai-model-options'), openrouterModelOptions: $('#openrouter-model-options'),
+    openaiApiUrl: $('#openai-api-url'), openrouterApiUrl: $('#openrouter-api-url'), systemPrompt: $('#system-prompt'),
     keyStatus: $('#key-status'), toast: $('#toast'), usageDialog: $('#usage-dialog'),
     monthTokens: $('#month-tokens'), usageMonth: $('#usage-month'), usageTotal: $('#usage-total'),
     usageCost: $('#usage-cost'), usageRequests: $('#usage-requests'), usageInput: $('#usage-input'),
     usageCached: $('#usage-cached'), usageOutput: $('#usage-output'), usageModels: $('#usage-models'),
-    usageRecent: $('#usage-recent'), usageNote: $('#usage-note'), historyList: $('#history-list'),
+    usageRecent: $('#usage-recent'), usageNote: $('#usage-note'), usageDashboard: $('#usage-dashboard'), historyList: $('#history-list'),
     historyEmpty: $('#history-empty'), historyToggle: $('#toggle-history'),
     attachments: $('#attachments'), uploadPDF: $('#upload-pdf'), pdfInput: $('#pdf-input'),
+    activeConnection: $('#active-connection'), activeModel: $('#active-model'), activeProvider: $('#active-provider'),
     conversationSearch: $('#conversation-search'), searchResults: $('#search-results'),
     treeZoom: $('#tree-zoom'), shortcutsDialog: $('#shortcuts-dialog')
   };
 
   migrateLegacyStorage();
-  let settings = loadJSON(SETTINGS_KEY, DEFAULT_SETTINGS);
+  let settings = normalizeSettings(loadJSON(SETTINGS_KEY, DEFAULT_SETTINGS));
+  let settingsDraftProfiles = null;
   let workspace = loadWorkspace();
   let state = currentMap();
   let usageRecords = loadUsage();
+  let openRouterPrices = loadOpenRouterPrices();
   let activeRequest = null;
   let uploadingPDFs = false;
   let uploadTargetMapId = null;
@@ -67,8 +90,45 @@
   let treeZoom = loadTreeZoom();
 
   function loadJSON(key, fallback) {
-    try { return { ...fallback, ...JSON.parse(localStorage.getItem(key) || '{}') }; }
+    try { return JSON.parse(localStorage.getItem(key) || 'null') || fallback; }
     catch { return { ...fallback }; }
+  }
+
+  function normalizeSettings(value = {}) {
+    const provider = PROVIDERS[value.provider] ? value.provider : 'openai';
+    const profiles = {};
+    for (const [id, defaults] of Object.entries(PROVIDERS)) {
+      const saved = value.profiles?.[id] || {};
+      profiles[id] = {
+        apiKey: String(saved.apiKey || ''),
+        model: String(saved.model || defaults.model),
+        apiUrl: String(saved.apiUrl || defaults.apiUrl)
+      };
+    }
+    // Settings saved before providers were introduced belong to OpenAI.
+    if (!value.profiles) {
+      profiles.openai = {
+        apiKey: String(value.apiKey || ''),
+        model: String(value.model || PROVIDERS.openai.model),
+        apiUrl: String(value.apiUrl || PROVIDERS.openai.apiUrl)
+      };
+    }
+    const active = profiles[provider];
+    return {
+      provider, profiles, apiKey: active.apiKey, model: active.model, apiUrl: active.apiUrl,
+      systemPrompt: String(value.systemPrompt ?? DEFAULT_SETTINGS.systemPrompt)
+    };
+  }
+
+  function providerLabel(provider = settings.provider) {
+    return PROVIDERS[provider]?.label || 'API provider';
+  }
+
+  function requestHeaders(json = false, connection = settings) {
+    const headers = { 'Authorization': `Bearer ${connection.apiKey}` };
+    if (json) headers['Content-Type'] = 'application/json';
+    if (connection.provider === 'openrouter') headers['X-OpenRouter-Title'] = 'Study Lab';
+    return headers;
   }
 
   function migrateLegacyStorage() {
@@ -90,6 +150,21 @@
       const records = JSON.parse(localStorage.getItem(USAGE_KEY) || '[]');
       return Array.isArray(records) ? records.filter(record => record && Number.isFinite(record.timestamp)) : [];
     } catch { return []; }
+  }
+
+  function loadOpenRouterPrices() {
+    try {
+      const prices = JSON.parse(localStorage.getItem(OPENROUTER_PRICES_KEY) || '{}');
+      return prices && typeof prices === 'object' && !Array.isArray(prices) ? prices : {};
+    } catch { return {}; }
+  }
+
+  function persistOpenRouterPrices() {
+    const recent = Object.entries(openRouterPrices)
+      .sort((a, b) => (Number(b[1]?.checkedAt) || 0) - (Number(a[1]?.checkedAt) || 0))
+      .slice(0, 40);
+    openRouterPrices = Object.fromEntries(recent);
+    try { localStorage.setItem(OPENROUTER_PRICES_KEY, JSON.stringify(openRouterPrices)); } catch {}
   }
 
   function loadTreeZoom() {
@@ -115,7 +190,8 @@
       .filter(file => file && file.id && file.name)
       .map(file => ({
         id: String(file.id), name: String(file.name), size: Number(file.size) || 0,
-        createdAt: Number(file.createdAt) || Date.now(), detail: file.detail === 'high' ? 'high' : 'low'
+        createdAt: Number(file.createdAt) || Date.now(), detail: file.detail === 'high' ? 'high' : 'low',
+        provider: PROVIDERS[file.provider] ? file.provider : 'openai'
       })) : [];
     const createdAt = Number(value.createdAt) || Number(normalized.nodes[0]?.createdAt) || Date.now();
     return {
@@ -268,7 +344,13 @@
     return markdown(node.answer || '');
   }
 
+  function answerAttribution(node) {
+    if (!node.model || !node.provider || !node.answer) return '';
+    return `<div class="answer-attribution" title="Generated by ${escapeHTML(node.model)} through ${escapeHTML(providerLabel(node.provider))}"><span>${escapeHTML(node.model)}</span><small>${escapeHTML(providerLabel(node.provider))}</small></div>`;
+  }
+
   function renderConversation({ scroll = false } = {}) {
+    const previousScroll = scroll ? null : { left: window.scrollX, top: window.scrollY };
     const path = pathTo(state.activeId);
     els.welcome.hidden = path.length > 0;
     els.conversation.hidden = path.length === 0;
@@ -279,7 +361,7 @@
       article.dataset.nodeId = node.id;
       article.innerHTML = `
         <div class="question-row"><div class="question-bubble">${escapeHTML(node.question)}</div></div>
-        <div class="answer"><span class="answer-mark" aria-hidden="true">S</span><div class="answer-body">${answerHTML(node)}</div></div>
+        <div class="answer"><span class="answer-mark" aria-hidden="true">S</span><div class="answer-content"><div class="answer-body">${answerHTML(node)}</div>${answerAttribution(node)}</div></div>
         <div class="answer-actions">
           <button class="mini-action copy-answer" type="button">Copy answer</button>
           <button class="mini-action branch-here" type="button">Branch here</button>
@@ -288,14 +370,24 @@
       fragment.append(article);
     }
     els.conversation.replaceChildren(fragment);
+    if (previousScroll && (window.scrollX !== previousScroll.left || window.scrollY !== previousScroll.top)) {
+      window.scrollTo({ ...previousScroll, behavior: 'auto' });
+    }
     renderBranchContext();
     if (scroll && state.activeId) requestAnimationFrame(() => {
       if (scroll === 'bottom') {
         window.scrollTo({ top: document.documentElement.scrollHeight, behavior: 'smooth' });
         return;
       }
-      const answer = $(`.message[data-node-id="${CSS.escape(state.activeId)}"] .answer`, els.conversation);
-      answer?.scrollIntoView({ block: 'start', behavior: 'smooth' });
+      const targetId = state.activeId;
+      requestAnimationFrame(() => {
+        if (state.activeId !== targetId) return;
+        const message = $(`.message[data-node-id="${CSS.escape(targetId)}"]`, els.conversation);
+        if (!message) return;
+        const headerHeight = $('.topbar')?.getBoundingClientRect().height || 68;
+        const top = window.scrollY + message.getBoundingClientRect().top - headerHeight - 14;
+        window.scrollTo({ top: Math.max(0, top), behavior: 'smooth' });
+      });
     });
   }
 
@@ -511,8 +603,10 @@
     for (const file of state.attachments) {
       const chip = document.createElement('span');
       chip.className = 'attachment-chip';
-      chip.title = `${file.name}${file.size ? ` · ${formatFileSize(file.size)}` : ''} · Included with every question in this map`;
-      chip.innerHTML = `<span class="pdf-badge" aria-hidden="true">PDF</span><span class="attachment-name">${escapeHTML(file.name)}</span><button class="remove-attachment" type="button" data-file-id="${escapeHTML(file.id)}" aria-label="Remove ${escapeHTML(file.name)} from this map">×</button>`;
+      const available = file.provider === settings.provider;
+      chip.classList.toggle('inactive-provider', !available);
+      chip.title = `${file.name}${file.size ? ` · ${formatFileSize(file.size)}` : ''} · Uploaded to ${providerLabel(file.provider)}${available ? ' · Included with every question' : ' · Not sent with the selected provider'}`;
+      chip.innerHTML = `<span class="pdf-badge" aria-hidden="true">PDF</span><span class="attachment-name">${escapeHTML(file.name)}</span>${available ? '' : `<span class="attachment-provider">${escapeHTML(providerLabel(file.provider))}</span>`}<button class="remove-attachment" type="button" data-file-id="${escapeHTML(file.id)}" aria-label="Remove ${escapeHTML(file.name)} from this map">×</button>`;
       fragment.append(chip);
     }
     if (uploadingPDFs && state.id === uploadTargetMapId) {
@@ -531,23 +625,40 @@
   function updateStreamedNode(node) {
     if (state.activeId !== node.id || !state.nodes.includes(node)) return;
     const body = $(`.message[data-node-id="${CSS.escape(node.id)}"] .answer-body`, els.conversation);
-    if (body) body.innerHTML = answerHTML(node);
+    if (body) {
+      const previousScroll = { left: window.scrollX, top: window.scrollY };
+      body.innerHTML = answerHTML(node);
+      if (window.scrollX !== previousScroll.left || window.scrollY !== previousScroll.top) {
+        window.scrollTo({ ...previousScroll, behavior: 'auto' });
+      }
+    }
   }
 
-  function inputFor(map, parentId, question) {
+  function inputFor(map, parentId, question, provider = settings.provider) {
     const messages = [];
     for (const node of pathTo(parentId, map)) {
-      messages.push({ role: 'user', content: node.question });
-      if (node.answer) messages.push({ role: 'assistant', content: node.answer });
+      if (provider === 'openrouter') {
+        messages.push({ type: 'message', role: 'user', content: [{ type: 'input_text', text: node.question }] });
+        if (node.answer) messages.push({
+          type: 'message', role: 'assistant', id: `msg_${String(node.id).replace(/[^a-zA-Z0-9_-]/g, '')}`,
+          status: 'completed', content: [{ type: 'output_text', text: node.answer, annotations: [] }]
+        });
+      } else {
+        messages.push({ role: 'user', content: node.question });
+        if (node.answer) messages.push({ role: 'assistant', content: node.answer });
+      }
     }
-    const content = map.attachments.map(file => ({ type: 'input_file', file_id: file.id, detail: file.detail || 'low' }));
+    const content = map.attachments
+      .filter(file => file.provider === provider)
+      .map(file => ({ type: 'input_file', file_id: file.id, detail: file.detail || 'low' }));
     content.push({ type: 'input_text', text: question });
-    messages.push({ role: 'user', content: map.attachments.length ? content : question });
+    const structured = provider === 'openrouter' || content.length > 1;
+    messages.push(structured ? { type: 'message', role: 'user', content } : { role: 'user', content: question });
     return messages;
   }
 
-  function filesEndpoint() {
-    const url = new URL(settings.apiUrl);
+  function filesEndpoint(apiUrl = settings.apiUrl) {
+    const url = new URL(apiUrl);
     if (!/\/responses\/?$/.test(url.pathname)) throw new Error('The configured endpoint is not a Responses API URL, so its Files endpoint cannot be derived.');
     url.pathname = url.pathname.replace(/\/responses\/?$/, '/files');
     url.search = '';
@@ -559,28 +670,29 @@
     const files = [...fileList];
     if (!files.length) return;
     if (activeRequest || uploadingPDFs) { showToast('Finish the current operation first'); return; }
-    if (!settings.apiKey) { openSettings(); showToast('Add an OpenAI API key before uploading'); return; }
+    if (!settings.apiKey) { openSettings(); showToast(`Add a ${providerLabel()} API key before uploading`); return; }
 
     const valid = files.filter(file => file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf'));
     if (valid.length !== files.length) { showToast('Only PDF files can be added'); return; }
     if (valid.some(file => file.size >= PDF_REQUEST_LIMIT)) { showToast('Each PDF must be smaller than 50 MB'); return; }
-    const existingBytes = state.attachments.reduce((total, file) => total + file.size, 0);
+    const existingBytes = state.attachments.filter(file => file.provider === settings.provider).reduce((total, file) => total + file.size, 0);
     const addedBytes = valid.reduce((total, file) => total + file.size, 0);
     if (existingBytes + addedBytes >= PDF_REQUEST_LIMIT) { showToast('PDFs in one map must total less than 50 MB'); return; }
 
     const targetMap = state;
+    const connection = { ...settings };
     uploadingPDFs = true;
     uploadTargetMapId = targetMap.id;
     renderAttachments();
     let uploaded = 0;
     try {
-      const endpoint = filesEndpoint();
+      const endpoint = filesEndpoint(connection.apiUrl);
       for (const file of valid) {
         const form = new FormData();
-        form.append('purpose', 'user_data');
+        if (connection.provider === 'openai') form.append('purpose', 'user_data');
         form.append('file', file, file.name);
         const response = await fetch(endpoint, {
-          method: 'POST', headers: { 'Authorization': `Bearer ${settings.apiKey}` }, body: form
+          method: 'POST', headers: requestHeaders(false, connection), body: form
         });
         if (!response.ok) {
           let message = `PDF upload failed (${response.status})`;
@@ -591,7 +703,8 @@
         if (!data.id) throw new Error('The Files API did not return a file ID.');
         targetMap.attachments.push({
           id: String(data.id), name: String(data.filename || file.name),
-          size: Number(data.bytes) || file.size, createdAt: Date.now(), detail: 'low'
+          size: Number(data.bytes ?? data.size_bytes) || file.size, createdAt: Date.now(), detail: 'low',
+          provider: connection.provider
         });
         uploaded += 1;
         touchMap(targetMap);
@@ -625,10 +738,14 @@
     if (!question) return;
     if (activeRequest) { showToast('Stop or finish the current response first'); return; }
     if (uploadingPDFs) { showToast('Wait for the PDF upload to finish'); return; }
-    if (!settings.apiKey) { openSettings(); showToast('Add an OpenAI API key to begin'); return; }
+    if (!settings.apiKey) { openSettings(); showToast(`Add a ${providerLabel()} API key to begin`); return; }
 
     const requestMap = state;
-    const node = { id: uid(), parentId: parentId || null, question, answer: '', status: 'loading', createdAt: Date.now() };
+    const connection = { ...settings };
+    const node = {
+      id: uid(), parentId: parentId || null, question, answer: '', status: 'loading', createdAt: Date.now(),
+      provider: connection.provider, model: connection.model
+    };
     requestMap.nodes.push(node);
     requestMap.activeId = node.id;
     revealNode(requestMap, node.id);
@@ -642,10 +759,10 @@
     let completedUsage = null;
 
     try {
-      const response = await fetch(settings.apiUrl, {
+      const response = await fetch(connection.apiUrl, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${settings.apiKey}` },
-        body: JSON.stringify({ model: settings.model, instructions: settings.systemPrompt, input: inputFor(requestMap, parentId, question), stream: true }),
+        headers: requestHeaders(true, connection),
+        body: JSON.stringify({ model: connection.model, instructions: connection.systemPrompt, input: inputFor(requestMap, parentId, question, connection.provider), stream: true }),
         signal: controller.signal
       });
       if (!response.ok) {
@@ -655,14 +772,15 @@
       }
       if (!response.body) throw new Error('This browser did not provide a streaming response body.');
       await consumeSSE(response.body, event => {
-        if (event.type === 'response.output_text.delta') node.answer += event.delta || '';
+        if (event.type === 'response.output_text.delta' || event.type === 'response.content_part.delta') node.answer += event.delta || '';
         if (event.type === 'response.completed' || event.type === 'response.done') {
+          node.model = String(event.response?.model || node.model);
           completedUsage = event.response?.usage || event.usage || completedUsage;
         }
         if (event.type === 'response.failed') throw new Error(event.response?.error?.message || 'The model response failed.');
       }, () => updateStreamedNode(node));
       node.status = 'complete';
-      if (completedUsage) recordUsage(node.id, settings.model, settings.apiUrl, completedUsage);
+      if (completedUsage) await recordUsage(node.id, node.model || connection.model, connection.apiUrl, completedUsage, connection.provider);
     } catch (error) {
       node.status = 'error';
       node.error = error.name === 'AbortError' ? 'Response stopped.' : error.message;
@@ -714,12 +832,46 @@
   }
 
   function openSettings() {
-    els.apiKey.value = settings.apiKey || '';
-    els.model.value = settings.model;
-    els.apiUrl.value = settings.apiUrl;
+    settingsDraftProfiles = structuredClone(settings.profiles);
+    els.provider.value = settings.provider;
+    els.openaiApiKey.value = settingsDraftProfiles.openai.apiKey || '';
+    els.openrouterApiKey.value = settingsDraftProfiles.openrouter.apiKey || '';
+    els.openaiModel.value = settingsDraftProfiles.openai.model || PROVIDERS.openai.model;
+    els.openrouterModel.value = settingsDraftProfiles.openrouter.model || PROVIDERS.openrouter.model;
+    els.openaiApiUrl.value = settingsDraftProfiles.openai.apiUrl || PROVIDERS.openai.apiUrl;
+    els.openrouterApiUrl.value = settingsDraftProfiles.openrouter.apiUrl || PROVIDERS.openrouter.apiUrl;
+    fillModelOptions(els.openaiModelOptions, PROVIDERS.openai.models);
+    fillModelOptions(els.openrouterModelOptions, PROVIDERS.openrouter.models);
+    updateProviderCards();
     els.systemPrompt.value = settings.systemPrompt;
     els.settings.showModal();
-    setTimeout(() => els.apiKey.focus(), 50);
+    setTimeout(() => (settings.provider === 'openrouter' ? els.openrouterApiKey : els.openaiApiKey).focus(), 50);
+  }
+
+  function fillModelOptions(list, models) {
+    list.replaceChildren(...models.map(model => Object.assign(document.createElement('option'), { value: model })));
+  }
+
+  function captureProviderForms() {
+    if (!settingsDraftProfiles) return;
+    settingsDraftProfiles = {
+      openai: {
+        apiKey: els.openaiApiKey.value.trim(),
+        model: els.openaiModel.value.trim() || PROVIDERS.openai.model,
+        apiUrl: els.openaiApiUrl.value.trim() || PROVIDERS.openai.apiUrl
+      },
+      openrouter: {
+        apiKey: els.openrouterApiKey.value.trim(),
+        model: els.openrouterModel.value.trim() || PROVIDERS.openrouter.model,
+        apiUrl: els.openrouterApiUrl.value.trim() || PROVIDERS.openrouter.apiUrl
+      }
+    };
+  }
+
+  function updateProviderCards() {
+    document.querySelectorAll('[data-provider-config]').forEach(card => {
+      card.classList.toggle('active', card.dataset.providerConfig === els.provider.value);
+    });
   }
 
   function showToast(message) {
@@ -729,7 +881,16 @@
     toastTimer = setTimeout(() => els.toast.classList.remove('show'), 2200);
   }
 
-  function updateKeyStatus() { els.keyStatus.classList.toggle('ready', Boolean(settings.apiKey)); }
+  function updateKeyStatus() {
+    els.keyStatus.classList.toggle('ready', Boolean(settings.apiKey));
+    els.activeModel.textContent = settings.model;
+    els.activeProvider.textContent = providerLabel();
+    els.activeConnection.title = `${providerLabel()} · ${settings.model} — open settings`;
+    els.activeConnection.setAttribute('aria-label', `Current model: ${settings.model} through ${providerLabel()}. Open API settings`);
+    const button = $('#open-settings');
+    button.title = `${providerLabel()} · ${settings.model}`;
+    button.setAttribute('aria-label', `API settings — ${providerLabel()}, ${settings.model}`);
+  }
 
   function updateThemeButton() {
     const dark = document.documentElement.dataset.theme === 'dark';
@@ -756,20 +917,56 @@
     catch { return false; }
   }
 
-  function recordUsage(nodeId, model, apiUrl, rawUsage) {
+  async function openRouterPriceForModel(model) {
+    const key = String(model || '').trim();
+    if (!key.includes('/')) return null;
+    const cached = openRouterPrices[key];
+    const validCached = cached && Number.isFinite(Number(cached.input)) && Number.isFinite(Number(cached.output));
+    if (validCached && Date.now() - Number(cached.checkedAt) < PRICE_CACHE_TTL) return cached;
+    try {
+      const path = key.split('/').map(encodeURIComponent).join('/');
+      const response = await fetch(`https://openrouter.ai/api/v1/model/${path}`, {
+        headers: { 'Accept': 'application/json' }
+      });
+      if (!response.ok) return validCached ? cached : null;
+      const pricing = (await response.json()).data?.pricing;
+      const prompt = pricing?.prompt == null ? NaN : Number(pricing.prompt);
+      const completion = pricing?.completion == null ? NaN : Number(pricing.completion);
+      const cacheRead = pricing?.input_cache_read == null ? NaN : Number(pricing.input_cache_read);
+      if (!Number.isFinite(prompt) || !Number.isFinite(completion)) return validCached ? cached : null;
+      const price = {
+        input: prompt * 1_000_000,
+        cached: (Number.isFinite(cacheRead) ? cacheRead : prompt) * 1_000_000,
+        output: completion * 1_000_000,
+        request: Number(pricing?.request) || 0,
+        checkedAt: Date.now(),
+        source: 'openrouter'
+      };
+      openRouterPrices[key] = price;
+      persistOpenRouterPrices();
+      return price;
+    } catch { return validCached ? cached : null; }
+  }
+
+  async function recordUsage(nodeId, model, apiUrl, rawUsage, provider) {
     if (usageRecords.some(record => record.nodeId === nodeId)) return;
     const inputTokens = Number(rawUsage.input_tokens) || 0;
     const outputTokens = Number(rawUsage.output_tokens) || 0;
     const cachedTokens = Math.min(inputTokens, Number(rawUsage.input_tokens_details?.cached_tokens) || 0);
     const totalTokens = Number(rawUsage.total_tokens) || inputTokens + outputTokens;
-    const price = isOpenAIEndpoint(apiUrl) ? priceForModel(model) : null;
+    const price = provider === 'openrouter'
+      ? await openRouterPriceForModel(model)
+      : (isOpenAIEndpoint(apiUrl) ? priceForModel(model) : null);
     const costUSD = price
-      ? (((inputTokens - cachedTokens) * price.input) + (cachedTokens * price.cached) + (outputTokens * price.output)) / 1_000_000
+      ? ((((inputTokens - cachedTokens) * price.input) + (cachedTokens * price.cached) + (outputTokens * price.output)) / 1_000_000) + (Number(price.request) || 0)
       : null;
     usageRecords.push({
       id: uid(), nodeId, timestamp: Date.now(), model: String(model || 'unknown'),
       inputTokens, cachedTokens, outputTokens, totalTokens, costUSD,
-      rates: price ? { input: price.input, cached: price.cached, output: price.output } : null
+      rates: price ? {
+        input: price.input, cached: price.cached, output: price.output,
+        request: Number(price.request) || 0, source: price.source || 'openai', checkedAt: price.checkedAt || Date.now()
+      } : null
     });
     // Keep bounded history while retaining roughly a year of normal personal use.
     usageRecords = usageRecords.slice(-2000);
@@ -852,12 +1049,15 @@
       </div>`).join('') : '<p class="usage-empty">Completed requests will appear here.</p>';
 
     els.usageNote.textContent = unpriced
-      ? `${unpriced} request${unpriced === 1 ? '' : 's'} could not be estimated because the model or endpoint has no local price entry.`
-      : 'Estimate uses standard OpenAI text-token prices recorded when each request completed. Pricing table checked August 17, 2026.';
+      ? `${unpriced} request${unpriced === 1 ? '' : 's'} could not be estimated because its model price could not be resolved.`
+      : 'Estimates use the rate recorded when each request completed: the local OpenAI table or OpenRouter\'s model-pricing API.';
   }
 
   function openUsage() {
     renderUsage();
+    const openRouter = settings.provider === 'openrouter';
+    els.usageDashboard.href = openRouter ? 'https://openrouter.ai/activity' : 'https://platform.openai.com/usage';
+    els.usageDashboard.textContent = `${openRouter ? 'OpenRouter' : 'OpenAI'} dashboard ↗`;
     els.usageDialog.showModal();
   }
 
@@ -1150,6 +1350,7 @@
   $('#close-selection').addEventListener('click', hideSelectionMenu);
   window.addEventListener('scroll', hideSelectionMenu, { passive: true });
   $('#open-settings').addEventListener('click', openSettings);
+  els.activeConnection.addEventListener('click', openSettings);
   $('#open-usage').addEventListener('click', openUsage);
   $('#theme-toggle').addEventListener('click', toggleTheme);
   $('#toggle-history').addEventListener('click', toggleHistory);
@@ -1183,14 +1384,34 @@
       showToast('Local usage history reset');
     }
   });
-  $('#toggle-key').addEventListener('click', event => { const show = els.apiKey.type === 'password'; els.apiKey.type = show ? 'text' : 'password'; event.target.textContent = show ? 'Hide' : 'Show'; });
+  document.querySelectorAll('.toggle-key').forEach(button => button.addEventListener('click', event => {
+    const input = document.getElementById(event.currentTarget.dataset.keyInput);
+    const show = input.type === 'password';
+    input.type = show ? 'text' : 'password';
+    event.currentTarget.textContent = show ? 'Hide' : 'Show';
+    event.currentTarget.setAttribute('aria-label', `${show ? 'Hide' : 'Show'} ${input.id === 'openrouter-api-key' ? 'OpenRouter' : 'OpenAI'} API key`);
+  }));
+  els.provider.addEventListener('change', updateProviderCards);
   $('#settings-form').addEventListener('submit', event => {
     event.preventDefault();
-    settings = { apiKey: els.apiKey.value.trim(), model: els.model.value.trim() || DEFAULT_SETTINGS.model, apiUrl: els.apiUrl.value.trim() || DEFAULT_SETTINGS.apiUrl, systemPrompt: els.systemPrompt.value.trim() };
+    captureProviderForms();
+    settings = normalizeSettings({ provider: els.provider.value, profiles: settingsDraftProfiles, systemPrompt: els.systemPrompt.value.trim() });
     localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
-    updateKeyStatus(); els.settings.close(); showToast('Settings saved');
+    settingsDraftProfiles = null;
+    updateKeyStatus(); renderAttachments(); els.settings.close(); showToast(`${providerLabel()} settings saved`);
   });
-  $('#forget-key').addEventListener('click', () => { settings.apiKey = ''; els.apiKey.value = ''; localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings)); updateKeyStatus(); showToast('API key removed'); });
+  $('#forget-key').addEventListener('click', () => {
+    const provider = els.provider.value;
+    const input = provider === 'openrouter' ? els.openrouterApiKey : els.openaiApiKey;
+    input.value = '';
+    settingsDraftProfiles[provider].apiKey = '';
+    const profiles = structuredClone(settings.profiles);
+    profiles[provider].apiKey = '';
+    settings = normalizeSettings({ provider: settings.provider, profiles, systemPrompt: settings.systemPrompt });
+    localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
+    updateKeyStatus();
+    showToast(`${providerLabel(provider)} API key removed`);
+  });
   $('#clear-history').addEventListener('click', () => clearChatHistory());
   $('#clear-branch').addEventListener('click', () => { state.activeId = state.nodes.at(-1)?.id || null; revealNode(state, state.activeId); persistSoon(); renderAll({ scroll: true }); });
   $('#collapse-map').addEventListener('click', () => { document.body.classList.remove('map-open'); document.body.classList.add('map-collapsed'); $('#expand-map').hidden = false; });
@@ -1205,5 +1426,5 @@
   updateTreeZoom();
   state.activeId = state.nodes.at(-1)?.id || null;
   revealNode(state, state.activeId);
-  renderAll({ scroll: state.activeId ? 'bottom' : false });
+  renderAll();
 })();

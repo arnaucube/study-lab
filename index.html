@@ -105,6 +105,10 @@
               <button id="upload-pdf" class="upload-pdf" type="button" title="Add PDFs to this map" aria-label="Add PDFs to this map">
                 <span aria-hidden="true">＋</span> PDF
               </button>
+              <button id="active-connection" class="active-connection" type="button" aria-label="Open API settings">
+                <span id="active-model">gpt-5-mini</span>
+                <small id="active-provider">OpenAI</small>
+              </button>
               <span class="hint"><kbd>Enter</kbd> send · <kbd>Shift</kbd> + <kbd>Enter</kbd> new line</span>
             </div>
             <button id="send" class="send" type="submit" aria-label="Send message">↑</button>
@@ -172,33 +176,78 @@
         </div>
         <button id="close-settings" class="icon-button" type="button" aria-label="Close settings">×</button>
       </div>
-      <p class="settings-copy">Use an OpenAI API key (not a ChatGPT password). It is stored only in this browser and sent directly to the configured API.</p>
-      <label>
-        API key
-        <div class="secret-field">
-          <input id="api-key" type="password" placeholder="sk-…" autocomplete="off" spellcheck="false">
-          <button id="toggle-key" type="button" aria-label="Show API key">Show</button>
-        </div>
+      <p class="settings-copy">Choose the active provider, then configure both connections below. Each provider keeps its own key, model, and endpoint.</p>
+      <label class="active-provider-field">
+        Active provider
+        <select id="provider">
+          <option value="openai">OpenAI</option>
+          <option value="openrouter">OpenRouter</option>
+        </select>
       </label>
-      <label>
-        Model
-        <input id="model" type="text" value="gpt-5-mini" placeholder="gpt-5-mini" spellcheck="false">
-      </label>
-      <details>
-        <summary>Advanced</summary>
-        <label>
-          Responses API endpoint
-          <input id="api-url" type="url" value="https://api.openai.com/v1/responses" spellcheck="false">
-        </label>
+      <div class="provider-configs">
+        <section class="provider-config" data-provider-config="openai">
+          <div class="provider-config-heading">
+            <div><span class="provider-logo">OAI</span><h3>OpenAI</h3></div>
+            <span class="provider-active">Selected</span>
+          </div>
+          <label>
+            API key
+            <div class="secret-field">
+              <input id="openai-api-key" type="password" placeholder="sk-…" autocomplete="off" spellcheck="false">
+              <button class="toggle-key" type="button" data-key-input="openai-api-key" aria-label="Show OpenAI API key">Show</button>
+            </div>
+          </label>
+          <label>
+            Model
+            <input id="openai-model" type="text" value="gpt-5-mini" placeholder="gpt-5-mini" list="openai-model-options" spellcheck="false">
+            <datalist id="openai-model-options"></datalist>
+          </label>
+          <details class="provider-advanced">
+            <summary>Endpoint</summary>
+            <label>
+              Responses API endpoint
+              <input id="openai-api-url" type="url" value="https://api.openai.com/v1/responses" spellcheck="false">
+            </label>
+          </details>
+        </section>
+        <section class="provider-config" data-provider-config="openrouter">
+          <div class="provider-config-heading">
+            <div><span class="provider-logo">OR</span><h3>OpenRouter</h3></div>
+            <span class="provider-active">Selected</span>
+          </div>
+          <label>
+            API key
+            <div class="secret-field">
+              <input id="openrouter-api-key" type="password" placeholder="sk-or-v1-…" autocomplete="off" spellcheck="false">
+              <button class="toggle-key" type="button" data-key-input="openrouter-api-key" aria-label="Show OpenRouter API key">Show</button>
+            </div>
+          </label>
+          <label>
+            Model
+            <input id="openrouter-model" type="text" value="openai/gpt-5-mini" placeholder="provider/model" list="openrouter-model-options" spellcheck="false">
+            <datalist id="openrouter-model-options"></datalist>
+            <small class="field-help">OpenRouter model IDs use the provider/model format.</small>
+          </label>
+          <details class="provider-advanced">
+            <summary>Endpoint</summary>
+            <label>
+              Responses API endpoint
+              <input id="openrouter-api-url" type="url" value="https://openrouter.ai/api/v1/responses" spellcheck="false">
+            </label>
+          </details>
+        </section>
+      </div>
+      <details class="shared-settings">
+        <summary>Shared instructions</summary>
         <label>
           System instructions
           <textarea id="system-prompt" rows="3">You are a patient technical tutor. Use clear Markdown and LaTeX where useful. Use mathematical language, assume graduate level knowledge. Build on the conversation context and explain assumptions.</textarea>
         </label>
       </details>
-      <div class="security-callout"><strong>Local-use note</strong> — any script running on this origin can access local storage. Use a restricted project key and never deploy this frontend publicly with a saved key.</div>
+      <div class="security-callout"><strong>Local-use note</strong> — any script running on this origin can access local storage. Use a restricted API key and never deploy this frontend publicly with a saved key.</div>
       <div class="dialog-actions">
         <button id="clear-history" class="button button-ghost danger" type="button">Clear chat history</button>
-        <button id="forget-key" class="button button-ghost danger" type="button">Forget key</button>
+        <button id="forget-key" class="button button-ghost danger" type="button">Forget selected key</button>
         <button class="button button-dark" value="save" type="submit">Save settings</button>
       </div>
     </form>
@@ -253,7 +302,7 @@
       <p class="usage-disclaimer">This is not your OpenAI invoice. It excludes requests from other browsers and applications, incomplete requests without returned usage, taxes, credits, tools, special processing, and usage recorded before this tracker was added. Prices can change.</p>
       <div class="dialog-actions">
         <button id="reset-usage" class="button button-ghost danger" type="button">Reset local history</button>
-        <a class="button button-ghost usage-dashboard" href="https://platform.openai.com/usage" target="_blank" rel="noopener noreferrer">Official dashboard ↗</a>
+        <a id="usage-dashboard" class="button button-ghost usage-dashboard" href="https://platform.openai.com/usage" target="_blank" rel="noopener noreferrer">OpenAI dashboard ↗</a>
         <button class="button button-dark" value="close" type="submit">Done</button>
       </div>
     </form>
