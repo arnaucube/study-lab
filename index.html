@@ -98,12 +98,12 @@
           <button id="clear-branch" type="button" aria-label="Return to latest node">×</button>
         </div>
         <form id="composer" class="composer">
-          <div id="attachments" class="attachments" aria-label="PDFs in this map" hidden></div>
+          <div id="attachments" class="attachments" aria-label="Files in this map" hidden></div>
           <textarea id="prompt" rows="1" placeholder="Ask anything…" aria-label="Message" maxlength="30000"></textarea>
           <div class="composer-footer">
             <div class="composer-tools">
-              <button id="upload-pdf" class="upload-pdf" type="button" title="Add PDFs to this map" aria-label="Add PDFs to this map">
-                <span aria-hidden="true">＋</span> PDF
+              <button id="upload-file" class="upload-file" type="button" title="Add PDF or Markdown files to this map" aria-label="Add PDF or Markdown files to this map">
+                <span aria-hidden="true">＋</span> PDF / MD
               </button>
               <button id="active-connection" class="active-connection" type="button" aria-label="Open API settings">
                 <span id="active-model">gpt-5-mini</span>
@@ -113,9 +113,9 @@
             </div>
             <button id="send" class="send" type="submit" aria-label="Send message">↑</button>
           </div>
-          <input id="pdf-input" type="file" accept="application/pdf,.pdf" multiple hidden>
+          <input id="file-input" type="file" accept="application/pdf,text/markdown,.pdf,.md" multiple hidden>
         </form>
-        <p class="privacy-note">Your map stays in this browser. Added PDFs are uploaded to the configured API.</p>
+        <p class="privacy-note">Your map stays in this browser. Added files are uploaded to the configured API.</p>
       </div>
     </section>
 
@@ -176,67 +176,33 @@
         </div>
         <button id="close-settings" class="icon-button" type="button" aria-label="Close settings">×</button>
       </div>
-      <p class="settings-copy">Choose the active provider, then configure both connections below. Each provider keeps its own key, model, and endpoint.</p>
-      <label class="active-provider-field">
-        Active provider
-        <select id="provider">
-          <option value="openai">OpenAI</option>
-          <option value="openrouter">OpenRouter</option>
-        </select>
-      </label>
-      <div class="provider-configs">
-        <section class="provider-config" data-provider-config="openai">
-          <div class="provider-config-heading">
-            <div><span class="provider-logo">OAI</span><h3>OpenAI</h3></div>
-            <span class="provider-active">Selected</span>
-          </div>
+      <p class="settings-copy">Add your provider keys once, then create model cards and choose which model Study Lab uses by default.</p>
+      <section class="api-key-settings" aria-labelledby="api-keys-title">
+        <h3 id="api-keys-title">API keys</h3>
+        <div class="api-key-grid">
           <label>
-            API key
+            OpenAI API key
             <div class="secret-field">
               <input id="openai-api-key" type="password" placeholder="sk-…" autocomplete="off" spellcheck="false">
               <button class="toggle-key" type="button" data-key-input="openai-api-key" aria-label="Show OpenAI API key">Show</button>
             </div>
           </label>
           <label>
-            Model
-            <input id="openai-model" type="text" value="gpt-5-mini" placeholder="gpt-5-mini" list="openai-model-options" spellcheck="false">
-            <datalist id="openai-model-options"></datalist>
-          </label>
-          <details class="provider-advanced">
-            <summary>Endpoint</summary>
-            <label>
-              Responses API endpoint
-              <input id="openai-api-url" type="url" value="https://api.openai.com/v1/responses" spellcheck="false">
-            </label>
-          </details>
-        </section>
-        <section class="provider-config" data-provider-config="openrouter">
-          <div class="provider-config-heading">
-            <div><span class="provider-logo">OR</span><h3>OpenRouter</h3></div>
-            <span class="provider-active">Selected</span>
-          </div>
-          <label>
-            API key
+            OpenRouter API key
             <div class="secret-field">
               <input id="openrouter-api-key" type="password" placeholder="sk-or-v1-…" autocomplete="off" spellcheck="false">
               <button class="toggle-key" type="button" data-key-input="openrouter-api-key" aria-label="Show OpenRouter API key">Show</button>
             </div>
           </label>
-          <label>
-            Model
-            <input id="openrouter-model" type="text" value="openai/gpt-5-mini" placeholder="provider/model" list="openrouter-model-options" spellcheck="false">
-            <datalist id="openrouter-model-options"></datalist>
-            <small class="field-help">OpenRouter model IDs use the provider/model format.</small>
-          </label>
-          <details class="provider-advanced">
-            <summary>Endpoint</summary>
-            <label>
-              Responses API endpoint
-              <input id="openrouter-api-url" type="url" value="https://openrouter.ai/api/v1/responses" spellcheck="false">
-            </label>
-          </details>
-        </section>
+        </div>
+      </section>
+      <div class="model-settings-heading">
+        <div><h3>Models</h3><p>Choose one model as the default connection.</p></div>
+        <button id="add-model" class="button button-ghost add-model" type="button" aria-label="Add model">+ Add model</button>
       </div>
+      <div id="model-configs" class="model-configs"></div>
+      <datalist id="openai-model-options"></datalist>
+      <datalist id="openrouter-model-options"></datalist>
       <details class="shared-settings">
         <summary>Shared instructions</summary>
         <label>
@@ -247,7 +213,6 @@
       <div class="security-callout"><strong>Local-use note</strong> — any script running on this origin can access local storage. Use a restricted API key and never deploy this frontend publicly with a saved key.</div>
       <div class="dialog-actions">
         <button id="clear-history" class="button button-ghost danger" type="button">Clear chat history</button>
-        <button id="forget-key" class="button button-ghost danger" type="button">Forget selected key</button>
         <button class="button button-dark" value="save" type="submit">Save settings</button>
       </div>
     </form>

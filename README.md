@@ -28,8 +28,8 @@ other:
 - monthly token tracking with per-model details and a local billing estimate
 - independent chat-history clearing and per-conversation deletion
 - multiple persistent maps with a browsable conversation sidebar
-- per-map PDF context for books and papers, uploaded once through the Files API
-- debounced search across map titles, questions, answers, and PDF names
+- per-map PDF and Markdown context, uploaded once through the Files API
+- debounced search across map titles, questions, answers, and attachment names
 - collapsible, zoomable concept trees with active-path highlighting
 - vim-style keyboard navigation for nodes, maps, search, and the composer
 - large-answer optimizations through throttled stream painting
@@ -57,16 +57,16 @@ npx --yes serve .
 Open the local URL printed by `serve`.
 
 1. Choose **Settings**.
-2. Select **OpenAI** or **OpenRouter**.
-3. Paste that provider's API key.
-4. Choose a suggested model or enter any model ID available to your account. OpenRouter model IDs use the `provider/model` form, such as `openai/gpt-5-mini`.
+2. Paste the API key for each provider you plan to use.
+3. Add model cards, choose OpenAI or OpenRouter on each card, and enter any model ID available to that account. OpenRouter model IDs use the `provider/model` form, such as `openai/gpt-5-mini`.
+4. Select the radio button on the model card that should be used by default.
 5. Save and ask a question.
 
-Settings places the active-provider dropdown at the top and shows separate OpenAI and OpenRouter configuration cards at the same time. Each card stores its own API key, model, and endpoint, so switching providers does not require re-entering its configuration.
+Settings stores the OpenAI and OpenRouter API keys once at the top. Model cards below can independently choose a provider, model ID, and endpoint; one card is selected as the default connection. A fresh installation starts with one OpenAI model card, and **+ Add model** creates more.
 
-To ask about a book or paper, choose **+ PDF** beside the composer and select one or more PDFs. The files are attached to the current map and included with questions sent through the same provider, including questions asked from older branches. Each file must be under 50 MB, and files attached through one provider in a map must total under 50 MB.
+To add reference material, choose **+ PDF / MD** beside the composer and select one or more PDF or Markdown (`.md`) files. The files are attached to the current map and included with questions sent through the same provider, including questions asked from older branches. Each file must be under 50 MB, and files attached through one provider in a map must total under 50 MB.
 
-The endpoint for each provider is configurable under **Advanced**. OpenAI defaults to `https://api.openai.com/v1/responses`; OpenRouter defaults to `https://openrouter.ai/api/v1/responses`.
+The endpoint on each model card is configurable under **Endpoint**. OpenAI defaults to `https://api.openai.com/v1/responses`; OpenRouter defaults to `https://openrouter.ai/api/v1/responses`.
 
 ## How branching works
 
@@ -84,7 +84,7 @@ Choose **New map** in the header or conversation sidebar to open a blank map. Th
 
 ## Search and navigation
 
-Use the search field in the conversation sidebar—or press `/` outside an input—to search all saved map titles, questions, answers, and PDF names. Results link directly to the matching map or question node. Search is debounced and capped at 60 displayed results to keep large workspaces responsive.
+Use the search field in the conversation sidebar—or press `/` outside an input—to search all saved map titles, questions, answers, and attachment names. Results link directly to the matching map or question node. Search is debounced and capped at 60 displayed results to keep large workspaces responsive.
 
 The concept-map toolbar can expand or collapse all branches and zoom the tree from 80% to 140%. Individual branches have disclosure arrows, and their collapsed state persists with the map. The current root-to-node path remains highlighted.
 
@@ -104,22 +104,22 @@ Vim-style shortcuts work whenever a text field or dialog control is not focused:
 
 ![In-app reference for Vim-style keyboard shortcuts](screenshots/vim%20shortcuts.png)
 
-## PDF context
+## File context
 
-PDFs are uploaded directly from the browser to the selected provider's Files endpoint, derived from its configured Responses API URL. Only their file IDs, provider, names, and sizes are stored in `localStorage`; the PDF bytes are not copied into browser storage. Page images use low visual detail to reduce token use, while extracted PDF text remains available to the model. Use a model that supports PDF inputs.
+PDF and Markdown files are uploaded directly from the browser to the selected provider's Files endpoint, derived from its configured Responses API URL. Only their file IDs, types, providers, names, and sizes are stored in `localStorage`; the file contents are not copied into browser storage. PDF page images use low visual detail to reduce token use, while extracted PDF text and Markdown text remain available to the model. Use a model that supports the selected file type.
 
-File IDs belong to the provider that received the upload. If you switch providers, PDFs uploaded to the other provider remain visible but are dimmed and are not sent. Upload the PDF again while the new provider is selected to use it there.
+File IDs belong to the provider that received the upload. If you switch providers, files uploaded to the other provider remain visible but are dimmed and are not sent. Upload the file again while the new provider is selected to use it there.
 
 PDF parsing adds extracted text and page images to the prompt, so large books can consume substantial input tokens on every question. The header usage tracker includes tokens reported for these requests. For very large collections or frequent querying, OpenAI recommends retrieval with File Search; this lightweight local app intentionally uses direct PDF input and does not create vector stores.
 
-Removing a PDF chip or clearing local chat history detaches the file locally but does **not** delete the uploaded copy from OpenAI. Delete retained files separately through your OpenAI account if needed. Custom API providers must expose a compatible `/files` endpoint next to their configured `/responses` endpoint.
+Removing a file chip or clearing local chat history detaches the file locally but does **not** delete the uploaded copy from the provider. Delete retained files separately through your provider account if needed. Custom API providers must expose a compatible `/files` endpoint next to their configured `/responses` endpoint.
 
 ## Storage and security
 
 The browser stores these local keys:
 
-- `study-lab:v1` — multi-map conversation workspace, PDF file references, collapsed branches, and active-map selection
-- `study-lab:settings:v1` — selected provider, per-provider API keys/models/endpoints, and system instructions
+- `study-lab:v1` — multi-map conversation workspace, attachment references, collapsed branches, and active-map selection
+- `study-lab:settings:v1` — provider API keys, model cards, the default model, endpoints, and system instructions
 - `study-lab:usage:v1` — token usage and estimated request costs recorded by this browser
 - `study-lab:openrouter-prices:v1` — a bounded cache of recently used OpenRouter model rates
 - `study-lab:theme` — light/dark theme preference

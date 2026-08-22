@@ -8,7 +8,7 @@
   const OPENROUTER_PRICES_KEY = `${APP_PREFIX}:openrouter-prices:v1`;
   const TREE_ZOOM_KEY = `${APP_PREFIX}:tree-zoom`;
   const THEME_KEY = `${APP_PREFIX}:theme`;
-  const PDF_REQUEST_LIMIT = 50 * 1024 * 1024;
+  const FILE_REQUEST_LIMIT = 50 * 1024 * 1024;
   const PRICE_CACHE_TTL = 24 * 60 * 60 * 1000;
   const PROVIDERS = {
     openai: {
@@ -36,14 +36,9 @@
     { match: /^gpt-4o-mini(?:-|$)/, input: .15, cached: .075, output: .6 }
   ];
   const DEFAULT_SETTINGS = {
-    provider: 'openai',
-    apiKey: '',
-    model: 'gpt-5-mini',
-    apiUrl: 'https://api.openai.com/v1/responses',
-    profiles: {
-      openai: { apiKey: '', model: 'gpt-5-mini', apiUrl: 'https://api.openai.com/v1/responses' },
-      openrouter: { apiKey: '', model: 'openai/gpt-5-mini', apiUrl: 'https://openrouter.ai/api/v1/responses' }
-    },
+    activeModelId: 'model-openai',
+    apiKeys: { openai: '', openrouter: '' },
+    models: [{ id: 'model-openai', provider: 'openai', model: 'gpt-5-mini', apiUrl: 'https://api.openai.com/v1/responses' }],
     systemPrompt: 'You are a patient technical tutor. Use clear Markdown and LaTeX where useful. Use mathematical language, assume graduate level knowledge. Build on the conversation context and explain assumptions.'
   };
 
@@ -54,17 +49,16 @@
     nodeCount: $('#node-count'), branchCount: $('#branch-count'), branchContext: $('#branch-context'),
     branchLabel: $('#branch-label'), selectionMenu: $('#selection-menu'), selectionPreview: $('#selection-preview'),
     selectionAction: $('#selection-action'), selectionCustom: $('#selection-custom'), settings: $('#settings-dialog'),
-    provider: $('#provider'), openaiApiKey: $('#openai-api-key'), openrouterApiKey: $('#openrouter-api-key'),
-    openaiModel: $('#openai-model'), openrouterModel: $('#openrouter-model'),
+    openaiApiKey: $('#openai-api-key'), openrouterApiKey: $('#openrouter-api-key'), modelConfigs: $('#model-configs'),
     openaiModelOptions: $('#openai-model-options'), openrouterModelOptions: $('#openrouter-model-options'),
-    openaiApiUrl: $('#openai-api-url'), openrouterApiUrl: $('#openrouter-api-url'), systemPrompt: $('#system-prompt'),
+    systemPrompt: $('#system-prompt'),
     keyStatus: $('#key-status'), toast: $('#toast'), usageDialog: $('#usage-dialog'),
     monthTokens: $('#month-tokens'), usageMonth: $('#usage-month'), usageTotal: $('#usage-total'),
     usageCost: $('#usage-cost'), usageRequests: $('#usage-requests'), usageInput: $('#usage-input'),
     usageCached: $('#usage-cached'), usageOutput: $('#usage-output'), usageModels: $('#usage-models'),
     usageRecent: $('#usage-recent'), usageNote: $('#usage-note'), usageDashboard: $('#usage-dashboard'), historyList: $('#history-list'),
     historyEmpty: $('#history-empty'), historyToggle: $('#toggle-history'),
-    attachments: $('#attachments'), uploadPDF: $('#upload-pdf'), pdfInput: $('#pdf-input'),
+    attachments: $('#attachments'), uploadFile: $('#upload-file'), fileInput: $('#file-input'),
     activeConnection: $('#active-connection'), activeModel: $('#active-model'), activeProvider: $('#active-provider'),
     conversationSearch: $('#conversation-search'), searchResults: $('#search-results'),
     treeZoom: $('#tree-zoom'), shortcutsDialog: $('#shortcuts-dialog')
@@ -72,13 +66,13 @@
 
   migrateLegacyStorage();
   let settings = normalizeSettings(loadJSON(SETTINGS_KEY, DEFAULT_SETTINGS));
-  let settingsDraftProfiles = null;
+  let settingsDraft = null;
   let workspace = loadWorkspace();
   let state = currentMap();
   let usageRecords = loadUsage();
   let openRouterPrices = loadOpenRouterPrices();
   let activeRequest = null;
-  let uploadingPDFs = false;
+  let uploadingFiles = false;
   let uploadTargetMapId = null;
   let selectedText = null;
   let saveTimer = 0;
@@ -95,27 +89,42 @@
   }
 
   function normalizeSettings(value = {}) {
-    const provider = PROVIDERS[value.provider] ? value.provider : 'openai';
-    const profiles = {};
-    for (const [id, defaults] of Object.entries(PROVIDERS)) {
-      const saved = value.profiles?.[id] || {};
-      profiles[id] = {
-        apiKey: String(saved.apiKey || ''),
-        model: String(saved.model || defaults.model),
-        apiUrl: String(saved.apiUrl || defaults.apiUrl)
-      };
+    const apiKeys = {
+      openai: String(value.apiKeys?.openai ?? value.profiles?.openai?.apiKey ?? value.apiKey ?? ''),
+      openrouter: String(value.apiKeys?.openrouter ?? value.profiles?.openrouter?.apiKey ?? '')
+    };
+    let sourceModels = Array.isArray(value.models) ? value.models : null;
+    if (!sourceModels?.length && value.profiles) {
+      sourceModels = Object.entries(PROVIDERS).map(([provider, defaults]) => ({
+        id: `model-${provider}`, provider, model: value.profiles[provider]?.model || defaults.model,
+        apiUrl: value.profiles[provider]?.apiUrl || defaults.apiUrl
+      }));
     }
-    // Settings saved before providers were introduced belong to OpenAI.
-    if (!value.profiles) {
-      profiles.openai = {
-        apiKey: String(value.apiKey || ''),
-        model: String(value.model || PROVIDERS.openai.model),
-        apiUrl: String(value.apiUrl || PROVIDERS.openai.apiUrl)
-      };
+    if (!sourceModels?.length) {
+      const provider = PROVIDERS[value.provider] ? value.provider : 'openai';
+      sourceModels = [{
+        id: 'model-openai', provider, model: value.model || PROVIDERS[provider].model,
+        apiUrl: value.apiUrl || PROVIDERS[provider].apiUrl
+      }];
     }
-    const active = profiles[provider];
+    const usedIds = new Set();
+    const models = sourceModels.map((saved, index) => {
+      const provider = PROVIDERS[saved?.provider] ? saved.provider : 'openai';
+      let id = String(saved?.id || `model-${index + 1}`);
+      while (usedIds.has(id)) id = `${id}-${index + 1}`;
+      usedIds.add(id);
+      return {
+        id, provider, model: String(saved?.model || PROVIDERS[provider].model),
+        apiUrl: String(saved?.apiUrl || PROVIDERS[provider].apiUrl)
+      };
+    });
+    const legacyActive = models.find(model => model.provider === value.provider)?.id;
+    const activeModelId = models.some(model => model.id === value.activeModelId)
+      ? value.activeModelId : (legacyActive || models[0].id);
+    const active = models.find(model => model.id === activeModelId) || models[0];
     return {
-      provider, profiles, apiKey: active.apiKey, model: active.model, apiUrl: active.apiUrl,
+      activeModelId, apiKeys, models, provider: active.provider, apiKey: apiKeys[active.provider],
+      model: active.model, apiUrl: active.apiUrl,
       systemPrompt: String(value.systemPrompt ?? DEFAULT_SETTINGS.systemPrompt)
     };
   }
@@ -191,6 +200,7 @@
       .map(file => ({
         id: String(file.id), name: String(file.name), size: Number(file.size) || 0,
         createdAt: Number(file.createdAt) || Date.now(), detail: file.detail === 'high' ? 'high' : 'low',
+        kind: file.kind === 'markdown' || String(file.name).toLowerCase().endsWith('.md') ? 'markdown' : 'pdf',
         provider: PROVIDERS[file.provider] ? file.provider : 'openai'
       })) : [];
     const createdAt = Number(value.createdAt) || Number(normalized.nodes[0]?.createdAt) || Date.now();
@@ -352,11 +362,21 @@
     const html = [];
     let paragraph = [];
     let list = null;
+    let listItemOpen = false;
     const flushParagraph = () => {
       if (paragraph.length) html.push(`<p>${inlineMarkdown(paragraph.join('\n')).replace(/\n/g, '<br>')}</p>`);
       paragraph = [];
     };
-    const closeList = () => { if (list) html.push(`</${list}>`); list = null; };
+    const closeListItem = () => {
+      if (listItemOpen) html.push('</li>');
+      listItemOpen = false;
+    };
+    const closeList = () => {
+      if (!list) return;
+      closeListItem();
+      html.push(`</${list}>`);
+      list = null;
+    };
 
     for (let lineIndex = 0; lineIndex < lines.length; lineIndex += 1) {
       const line = lines[lineIndex];
@@ -378,7 +398,7 @@
       }
       const heading = line.match(/^(#{1,3})\s+(.+)/);
       const bullet = line.match(/^\s*[-*+]\s+(.+)/);
-      const numbered = line.match(/^\s*\d+[.)]\s+(.+)/);
+      const numbered = line.match(/^\s*(\d+)[.)]\s+(.+)/);
       const quote = line.match(/^>\s?(.*)/);
       const blockToken = line.match(/^\u0000(\d+)\u0000$/);
       if (blockToken) { flushParagraph(); closeList(); html.push(stash[Number(blockToken[1])]); }
@@ -386,11 +406,27 @@
       else if (bullet || numbered) {
         flushParagraph();
         const wanted = bullet ? 'ul' : 'ol';
-        if (list !== wanted) { closeList(); html.push(`<${wanted}>`); list = wanted; }
-        html.push(`<li>${inlineMarkdown((bullet || numbered)[1])}</li>`);
+        if (list !== wanted) {
+          closeList();
+          const start = numbered && numbered[1] !== '1' ? ` start="${Number(numbered[1])}"` : '';
+          html.push(`<${wanted}${start}>`);
+          list = wanted;
+        } else closeListItem();
+        html.push(`<li>${inlineMarkdown(bullet ? bullet[1] : numbered[2])}`);
+        listItemOpen = true;
       } else if (quote) { flushParagraph(); closeList(); html.push(`<blockquote>${inlineMarkdown(quote[1])}</blockquote>`); }
-      else if (!line.trim()) { flushParagraph(); closeList(); }
-      else paragraph.push(line);
+      else if (!line.trim()) {
+        flushParagraph();
+        let nextIndex = lineIndex + 1;
+        while (nextIndex < lines.length && !lines[nextIndex].trim()) nextIndex += 1;
+        const nextLine = lines[nextIndex] || '';
+        const continuesList = Boolean(list) && (/^\s+\S/.test(nextLine) || (list === 'ul'
+          ? /^\s*[-*+]\s+/.test(nextLine)
+          : /^\s*\d+[.)]\s+/.test(nextLine)));
+        if (!continuesList) closeList();
+      }
+      else if (list && /^\s+\S/.test(line)) html.push(`<p>${inlineMarkdown(line.trim())}</p>`);
+      else { closeList(); paragraph.push(line); }
     }
     flushParagraph(); closeList();
     return html.join('').replace(/\u0000(\d+)\u0000/g, (_, index) => stash[Number(index)]);
@@ -560,8 +596,8 @@
       button.dataset.mapId = map.id;
       button.setAttribute('aria-current', map.id === workspace.activeMapId ? 'page' : 'false');
       const date = new Date(map.updatedAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
-      const pdfMeta = map.attachments.length ? ` · ${map.attachments.length} PDF${map.attachments.length === 1 ? '' : 's'}` : '';
-      button.innerHTML = `<span class="history-glyph" aria-hidden="true">${map.nodes.length || map.attachments.length ? '◇' : '＋'}</span><span class="history-copy"><span class="history-title">${escapeHTML(map.title)}</span><span class="history-meta">${map.nodes.length} ${map.nodes.length === 1 ? 'node' : 'nodes'}${pdfMeta} · ${date}</span></span>`;
+      const fileMeta = map.attachments.length ? ` · ${map.attachments.length} file${map.attachments.length === 1 ? '' : 's'}` : '';
+      button.innerHTML = `<span class="history-glyph" aria-hidden="true">${map.nodes.length || map.attachments.length ? '◇' : '＋'}</span><span class="history-copy"><span class="history-title">${escapeHTML(map.title)}</span><span class="history-meta">${map.nodes.length} ${map.nodes.length === 1 ? 'node' : 'nodes'}${fileMeta} · ${date}</span></span>`;
       const rename = document.createElement('button');
       rename.type = 'button';
       rename.className = 'rename-map';
@@ -598,7 +634,7 @@
         });
       }
       for (const file of map.attachments) {
-        entries.push({ mapId: map.id, nodeId: null, kind: 'PDF', label: file.name, fields: [file.name], mapTitle: map.title });
+        entries.push({ mapId: map.id, nodeId: null, kind: file.kind === 'markdown' ? 'Markdown' : 'PDF', label: file.name, fields: [file.name], mapTitle: map.title });
       }
     }
     searchIndex = entries;
@@ -664,18 +700,19 @@
       const available = file.provider === settings.provider;
       chip.classList.toggle('inactive-provider', !available);
       chip.title = `${file.name}${file.size ? ` · ${formatFileSize(file.size)}` : ''} · Uploaded to ${providerLabel(file.provider)}${available ? ' · Included with every question' : ' · Not sent with the selected provider'}`;
-      chip.innerHTML = `<span class="pdf-badge" aria-hidden="true">PDF</span><span class="attachment-name">${escapeHTML(file.name)}</span>${available ? '' : `<span class="attachment-provider">${escapeHTML(providerLabel(file.provider))}</span>`}<button class="remove-attachment" type="button" data-file-id="${escapeHTML(file.id)}" aria-label="Remove ${escapeHTML(file.name)} from this map">×</button>`;
+      const badge = file.kind === 'markdown' ? 'MD' : 'PDF';
+      chip.innerHTML = `<span class="attachment-badge${file.kind === 'markdown' ? ' md' : ''}" aria-hidden="true">${badge}</span><span class="attachment-name">${escapeHTML(file.name)}</span>${available ? '' : `<span class="attachment-provider">${escapeHTML(providerLabel(file.provider))}</span>`}<button class="remove-attachment" type="button" data-file-id="${escapeHTML(file.id)}" aria-label="Remove ${escapeHTML(file.name)} from this map">×</button>`;
       fragment.append(chip);
     }
-    if (uploadingPDFs && state.id === uploadTargetMapId) {
+    if (uploadingFiles && state.id === uploadTargetMapId) {
       const status = document.createElement('span');
       status.className = 'attachment-chip upload-status';
       status.innerHTML = '<span class="upload-spinner" aria-hidden="true"></span> Uploading…';
       fragment.append(status);
     }
     els.attachments.replaceChildren(fragment);
-    els.attachments.hidden = !state.attachments.length && !(uploadingPDFs && state.id === uploadTargetMapId);
-    els.uploadPDF.disabled = uploadingPDFs || Boolean(activeRequest);
+    els.attachments.hidden = !state.attachments.length && !(uploadingFiles && state.id === uploadTargetMapId);
+    els.uploadFile.disabled = uploadingFiles || Boolean(activeRequest);
   }
 
   function renderAll(options) { renderConversation(options); renderTree(); renderHistory(); renderAttachments(); }
@@ -708,7 +745,9 @@
     }
     const content = map.attachments
       .filter(file => file.provider === provider)
-      .map(file => ({ type: 'input_file', file_id: file.id, detail: file.detail || 'low' }));
+      .map(file => file.kind === 'markdown'
+        ? { type: 'input_file', file_id: file.id }
+        : { type: 'input_file', file_id: file.id, detail: file.detail || 'low' });
     content.push({ type: 'input_text', text: question });
     const structured = provider === 'openrouter' || content.length > 1;
     messages.push(structured ? { type: 'message', role: 'user', content } : { role: 'user', content: question });
@@ -724,22 +763,22 @@
     return url.toString();
   }
 
-  async function uploadPDFs(fileList) {
+  async function uploadFiles(fileList) {
     const files = [...fileList];
     if (!files.length) return;
-    if (activeRequest || uploadingPDFs) { showToast('Finish the current operation first'); return; }
+    if (activeRequest || uploadingFiles) { showToast('Finish the current operation first'); return; }
     if (!settings.apiKey) { openSettings(); showToast(`Add a ${providerLabel()} API key before uploading`); return; }
 
-    const valid = files.filter(file => file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf'));
-    if (valid.length !== files.length) { showToast('Only PDF files can be added'); return; }
-    if (valid.some(file => file.size >= PDF_REQUEST_LIMIT)) { showToast('Each PDF must be smaller than 50 MB'); return; }
+    const valid = files.filter(file => /\.(pdf|md)$/i.test(file.name));
+    if (valid.length !== files.length) { showToast('Only PDF and Markdown (.md) files can be added'); return; }
+    if (valid.some(file => file.size >= FILE_REQUEST_LIMIT)) { showToast('Each file must be smaller than 50 MB'); return; }
     const existingBytes = state.attachments.filter(file => file.provider === settings.provider).reduce((total, file) => total + file.size, 0);
     const addedBytes = valid.reduce((total, file) => total + file.size, 0);
-    if (existingBytes + addedBytes >= PDF_REQUEST_LIMIT) { showToast('PDFs in one map must total less than 50 MB'); return; }
+    if (existingBytes + addedBytes >= FILE_REQUEST_LIMIT) { showToast('Files in one map must total less than 50 MB'); return; }
 
     const targetMap = state;
     const connection = { ...settings };
-    uploadingPDFs = true;
+    uploadingFiles = true;
     uploadTargetMapId = targetMap.id;
     renderAttachments();
     let uploaded = 0;
@@ -753,7 +792,7 @@
           method: 'POST', headers: requestHeaders(false, connection), body: form
         });
         if (!response.ok) {
-          let message = `PDF upload failed (${response.status})`;
+          let message = `File upload failed (${response.status})`;
           try { const data = await response.json(); message = data.error?.message || message; } catch {}
           throw new Error(message);
         }
@@ -762,6 +801,7 @@
         targetMap.attachments.push({
           id: String(data.id), name: String(data.filename || file.name),
           size: Number(data.bytes ?? data.size_bytes) || file.size, createdAt: Date.now(), detail: 'low',
+          kind: file.name.toLowerCase().endsWith('.md') ? 'markdown' : 'pdf',
           provider: connection.provider
         });
         uploaded += 1;
@@ -769,13 +809,13 @@
         persistNow();
         if (state === targetMap) renderAll();
       }
-      showToast(`${uploaded} PDF${uploaded === 1 ? '' : 's'} added to this map`);
+      showToast(`${uploaded} file${uploaded === 1 ? '' : 's'} added to this map`);
     } catch (error) {
-      showToast(error.message || 'PDF upload failed');
+      showToast(error.message || 'File upload failed');
     } finally {
-      uploadingPDFs = false;
+      uploadingFiles = false;
       uploadTargetMapId = null;
-      els.pdfInput.value = '';
+      els.fileInput.value = '';
       renderAll();
     }
   }
@@ -788,14 +828,14 @@
     touchMap();
     persistNow();
     renderAll();
-    showToast('PDF removed from this map');
+    showToast('File removed from this map');
   }
 
   async function ask(question, parentId = state.activeId) {
     question = question.trim();
     if (!question) return;
     if (activeRequest) { showToast('Stop or finish the current response first'); return; }
-    if (uploadingPDFs) { showToast('Wait for the PDF upload to finish'); return; }
+    if (uploadingFiles) { showToast('Wait for the file upload to finish'); return; }
     if (!settings.apiKey) { openSettings(); showToast(`Add a ${providerLabel()} API key to begin`); return; }
 
     const requestMap = state;
@@ -886,21 +926,18 @@
     els.prompt.disabled = busy;
     els.send.textContent = busy ? '■' : '↑';
     els.send.setAttribute('aria-label', busy ? 'Stop response' : 'Send message');
-    els.uploadPDF.disabled = busy || uploadingPDFs;
+    els.uploadFile.disabled = busy || uploadingFiles;
   }
 
   function openSettings() {
-    settingsDraftProfiles = structuredClone(settings.profiles);
-    els.provider.value = settings.provider;
-    els.openaiApiKey.value = settingsDraftProfiles.openai.apiKey || '';
-    els.openrouterApiKey.value = settingsDraftProfiles.openrouter.apiKey || '';
-    els.openaiModel.value = settingsDraftProfiles.openai.model || PROVIDERS.openai.model;
-    els.openrouterModel.value = settingsDraftProfiles.openrouter.model || PROVIDERS.openrouter.model;
-    els.openaiApiUrl.value = settingsDraftProfiles.openai.apiUrl || PROVIDERS.openai.apiUrl;
-    els.openrouterApiUrl.value = settingsDraftProfiles.openrouter.apiUrl || PROVIDERS.openrouter.apiUrl;
+    settingsDraft = structuredClone({
+      activeModelId: settings.activeModelId, apiKeys: settings.apiKeys, models: settings.models
+    });
+    els.openaiApiKey.value = settingsDraft.apiKeys.openai || '';
+    els.openrouterApiKey.value = settingsDraft.apiKeys.openrouter || '';
     fillModelOptions(els.openaiModelOptions, PROVIDERS.openai.models);
     fillModelOptions(els.openrouterModelOptions, PROVIDERS.openrouter.models);
-    updateProviderCards();
+    renderModelCards();
     els.systemPrompt.value = settings.systemPrompt;
     els.settings.showModal();
     setTimeout(() => (settings.provider === 'openrouter' ? els.openrouterApiKey : els.openaiApiKey).focus(), 50);
@@ -910,25 +947,59 @@
     list.replaceChildren(...models.map(model => Object.assign(document.createElement('option'), { value: model })));
   }
 
-  function captureProviderForms() {
-    if (!settingsDraftProfiles) return;
-    settingsDraftProfiles = {
-      openai: {
-        apiKey: els.openaiApiKey.value.trim(),
-        model: els.openaiModel.value.trim() || PROVIDERS.openai.model,
-        apiUrl: els.openaiApiUrl.value.trim() || PROVIDERS.openai.apiUrl
-      },
-      openrouter: {
-        apiKey: els.openrouterApiKey.value.trim(),
-        model: els.openrouterModel.value.trim() || PROVIDERS.openrouter.model,
-        apiUrl: els.openrouterApiUrl.value.trim() || PROVIDERS.openrouter.apiUrl
-      }
-    };
+  function renderModelCards() {
+    if (!settingsDraft) return;
+    els.modelConfigs.innerHTML = settingsDraft.models.map((connection, index) => {
+      const defaults = PROVIDERS[connection.provider];
+      const active = connection.id === settingsDraft.activeModelId;
+      return `<section class="model-config${active ? ' active' : ''}" data-model-card data-model-id="${escapeHTML(connection.id)}" data-provider="${connection.provider}">
+        <div class="model-config-heading">
+          <div><span class="provider-logo">${connection.provider === 'openrouter' ? 'OR' : 'OAI'}</span><h4>Model ${index + 1}</h4></div>
+          <label class="default-model"><input class="default-model-radio" type="radio" name="default-model" value="${escapeHTML(connection.id)}"${active ? ' checked' : ''}> Use by default</label>
+        </div>
+        <div class="model-fields">
+          <label>Provider
+            <select class="model-provider">
+              <option value="openai"${connection.provider === 'openai' ? ' selected' : ''}>OpenAI</option>
+              <option value="openrouter"${connection.provider === 'openrouter' ? ' selected' : ''}>OpenRouter</option>
+            </select>
+          </label>
+          <label>Model
+            <input class="model-name-input" type="text" value="${escapeHTML(connection.model)}" placeholder="${escapeHTML(defaults.model)}" list="${connection.provider}-model-options" spellcheck="false" required>
+          </label>
+        </div>
+        <details class="provider-advanced">
+          <summary>Endpoint</summary>
+          <label>Responses API endpoint
+            <input class="model-api-url" type="url" value="${escapeHTML(connection.apiUrl)}" spellcheck="false" required>
+          </label>
+        </details>
+        <button class="remove-model" type="button"${settingsDraft.models.length === 1 ? ' disabled' : ''} aria-label="Remove model ${index + 1}">Remove model</button>
+      </section>`;
+    }).join('');
   }
 
-  function updateProviderCards() {
-    document.querySelectorAll('[data-provider-config]').forEach(card => {
-      card.classList.toggle('active', card.dataset.providerConfig === els.provider.value);
+  function captureSettingsForm() {
+    if (!settingsDraft) return;
+    settingsDraft.apiKeys = {
+      openai: els.openaiApiKey.value.trim(), openrouter: els.openrouterApiKey.value.trim()
+    };
+    settingsDraft.models = [...els.modelConfigs.querySelectorAll('[data-model-card]')].map(card => {
+      const provider = $('.model-provider', card).value;
+      return {
+        id: card.dataset.modelId, provider,
+        model: $('.model-name-input', card).value.trim() || PROVIDERS[provider].model,
+        apiUrl: $('.model-api-url', card).value.trim() || PROVIDERS[provider].apiUrl
+      };
+    });
+    settingsDraft.activeModelId = $('input[name="default-model"]:checked', els.modelConfigs)?.value
+      || settingsDraft.models[0]?.id;
+  }
+
+  function updateModelCardSelection() {
+    const selected = $('input[name="default-model"]:checked', els.modelConfigs)?.value;
+    els.modelConfigs.querySelectorAll('[data-model-card]').forEach(card => {
+      card.classList.toggle('active', card.dataset.modelId === selected);
     });
   }
 
@@ -1280,7 +1351,7 @@
   function deleteMap(mapId) {
     const map = workspace.maps.find(candidate => candidate.id === mapId);
     if (!map) return;
-    if (uploadingPDFs && uploadTargetMapId === map.id) { showToast('Wait for this map’s PDF upload to finish'); return; }
+    if (uploadingFiles && uploadTargetMapId === map.id) { showToast('Wait for this map’s file upload to finish'); return; }
     const remoteNote = map.attachments.length ? ' Uploaded API files will not be deleted.' : '';
     if (!confirm(`Delete “${map.title}” and its entire conversation? This cannot be undone.${remoteNote}`)) return;
     if (activeRequest && map.nodes.some(node => node.status === 'loading')) activeRequest.abort();
@@ -1423,9 +1494,10 @@
   });
   $('#study-lab-home').addEventListener('click', event => { event.preventDefault(); createNewMap(); });
   $('#new-map-sidebar').addEventListener('click', createNewMap);
-  els.uploadPDF.addEventListener('click', () => els.pdfInput.click());
-  els.pdfInput.addEventListener('change', () => uploadPDFs(els.pdfInput.files));
+  els.uploadFile.addEventListener('click', () => els.fileInput.click());
+  els.fileInput.addEventListener('change', () => uploadFiles(els.fileInput.files));
   $('#close-settings').addEventListener('click', () => els.settings.close());
+  els.settings.addEventListener('close', () => { settingsDraft = null; });
   $('#close-usage').addEventListener('click', () => els.usageDialog.close());
   $('#open-shortcuts').addEventListener('click', () => els.shortcutsDialog.showModal());
   $('#close-shortcuts').addEventListener('click', () => els.shortcutsDialog.close());
@@ -1449,26 +1521,42 @@
     event.currentTarget.textContent = show ? 'Hide' : 'Show';
     event.currentTarget.setAttribute('aria-label', `${show ? 'Hide' : 'Show'} ${input.id === 'openrouter-api-key' ? 'OpenRouter' : 'OpenAI'} API key`);
   }));
-  els.provider.addEventListener('change', updateProviderCards);
+  $('#add-model').addEventListener('click', () => {
+    captureSettingsForm();
+    const id = uid();
+    settingsDraft.models.push({ id, provider: 'openai', model: PROVIDERS.openai.model, apiUrl: PROVIDERS.openai.apiUrl });
+    renderModelCards();
+    $('.model-name-input', els.modelConfigs.lastElementChild)?.focus();
+  });
+  els.modelConfigs.addEventListener('change', event => {
+    if (event.target.matches('.default-model-radio')) { updateModelCardSelection(); return; }
+    if (!event.target.matches('.model-provider')) return;
+    const card = event.target.closest('[data-model-card]');
+    const previousProvider = card.dataset.provider;
+    const provider = event.target.value;
+    captureSettingsForm();
+    const connection = settingsDraft.models.find(model => model.id === card.dataset.modelId);
+    if (connection.model === PROVIDERS[previousProvider].model) connection.model = PROVIDERS[provider].model;
+    if (connection.apiUrl === PROVIDERS[previousProvider].apiUrl) connection.apiUrl = PROVIDERS[provider].apiUrl;
+    connection.provider = provider;
+    renderModelCards();
+  });
+  els.modelConfigs.addEventListener('click', event => {
+    const button = event.target.closest('.remove-model');
+    if (!button || button.disabled) return;
+    const id = button.closest('[data-model-card]').dataset.modelId;
+    captureSettingsForm();
+    settingsDraft.models = settingsDraft.models.filter(model => model.id !== id);
+    if (settingsDraft.activeModelId === id) settingsDraft.activeModelId = settingsDraft.models[0].id;
+    renderModelCards();
+  });
   $('#settings-form').addEventListener('submit', event => {
     event.preventDefault();
-    captureProviderForms();
-    settings = normalizeSettings({ provider: els.provider.value, profiles: settingsDraftProfiles, systemPrompt: els.systemPrompt.value.trim() });
+    captureSettingsForm();
+    settings = normalizeSettings({ ...settingsDraft, systemPrompt: els.systemPrompt.value.trim() });
     localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
-    settingsDraftProfiles = null;
+    settingsDraft = null;
     updateKeyStatus(); renderAttachments(); els.settings.close(); showToast(`${providerLabel()} settings saved`);
-  });
-  $('#forget-key').addEventListener('click', () => {
-    const provider = els.provider.value;
-    const input = provider === 'openrouter' ? els.openrouterApiKey : els.openaiApiKey;
-    input.value = '';
-    settingsDraftProfiles[provider].apiKey = '';
-    const profiles = structuredClone(settings.profiles);
-    profiles[provider].apiKey = '';
-    settings = normalizeSettings({ provider: settings.provider, profiles, systemPrompt: settings.systemPrompt });
-    localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
-    updateKeyStatus();
-    showToast(`${providerLabel(provider)} API key removed`);
   });
   $('#clear-history').addEventListener('click', () => clearChatHistory());
   $('#clear-branch').addEventListener('click', () => { state.activeId = state.nodes.at(-1)?.id || null; revealNode(state, state.activeId); persistSoon(); renderAll({ scroll: true }); });
