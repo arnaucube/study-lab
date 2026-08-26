@@ -82,6 +82,7 @@
   let pendingG = false;
   let pendingGTimer = 0;
   let treeZoom = loadTreeZoom();
+  let installPrompt = null;
 
   function loadJSON(key, fallback) {
     try { return JSON.parse(localStorage.getItem(key) || 'null') || fallback; }
@@ -1564,6 +1565,33 @@
   $('#expand-map').addEventListener('click', () => { document.body.classList.remove('map-collapsed', 'history-open'); document.body.classList.add('map-open'); $('#expand-map').hidden = true; updateHistoryToggle(); });
   addEventListener('resize', updateHistoryToggle, { passive: true });
   document.addEventListener('keydown', handleVimNavigation);
+
+  const installButton = $('#install-app');
+  window.addEventListener('beforeinstallprompt', event => {
+    event.preventDefault();
+    installPrompt = event;
+    installButton.hidden = false;
+  });
+  window.addEventListener('appinstalled', () => {
+    installPrompt = null;
+    installButton.hidden = true;
+    showToast('Study Lab installed');
+  });
+  installButton.addEventListener('click', async () => {
+    if (!installPrompt) return;
+    installPrompt.prompt();
+    await installPrompt.userChoice;
+    installPrompt = null;
+    installButton.hidden = true;
+  });
+
+  if ('serviceWorker' in navigator) {
+    window.addEventListener('load', () => {
+      navigator.serviceWorker.register('./service-worker.js').catch(error => {
+        console.warn('Study Lab service worker registration failed:', error);
+      });
+    });
+  }
 
   updateKeyStatus();
   updateThemeButton();

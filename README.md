@@ -48,6 +48,10 @@ python3 -m http.server 8080
 
 Then open <http://localhost:8080>.
 
+### Install on Android
+
+Serve Study Lab over HTTPS (or use `localhost` while testing), open it in Chrome on Android, and choose **Install app** when the button appears. You can also use Chrome's menu and choose **Install app** or **Add to Home screen**. The installed app opens in its own window and caches its local interface for offline startup; sending AI requests still requires an internet connection.
+
 Alternatively, with Node.js:
 
 ```bash

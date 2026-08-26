@@ -60,6 +60,8 @@ button { color: inherit; }
 .history-toggle { display: grid; place-items: center; width: 34px; height: 34px; border: 1px solid var(--line); border-radius: 9px; background: transparent; cursor: pointer; font-size: 1rem; }
 .history-toggle:hover { background: var(--card); }
 .top-actions { display: flex; align-items: center; gap: 8px; }
+.install-button { height: 34px; padding: 0 12px; border: 0; border-radius: 999px; background: var(--sage-dark); color: #fff; cursor: pointer; font-size: .7rem; font-weight: 750; white-space: nowrap; }
+.install-button:hover { filter: brightness(1.08); }
 .github-button { display: grid; place-items: center; width: 34px; height: 34px; border: 1px solid var(--line); border-radius: 50%; color: var(--ink); background: transparent; transition: transform .15s, background .15s; }
 .github-button:hover { transform: translateY(-1px); background: var(--card); }
 .github-button svg { width: 17px; height: 17px; fill: currentColor; }
@@ -363,6 +365,8 @@ body.map-collapsed .composer-wrap { right: 0; }
   .usage-dialog .dialog-actions { display: grid; grid-template-columns: 1fr 1fr; }
   .usage-dialog .dialog-actions .button-dark { grid-column: 1 / -1; }
   .shortcut-list { grid-template-columns: 118px 1fr; gap: 9px 11px; }
+  .install-button { width: 34px; padding: 0; font-size: 0; }
+  .install-button::before { content: "↓"; font-size: 1rem; }
 }
 @media (max-width: 700px) {
   .api-key-grid, .model-fields { grid-template-columns: 1fr; gap: 0; }
