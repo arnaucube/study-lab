@@ -1,4 +1,4 @@
-const CACHE_NAME = 'study-lab-shell-v1';
+const CACHE_NAME = 'study-lab-shell-v4';
 const APP_SHELL = [
   './',
   './index.html',

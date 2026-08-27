@@ -6,6 +6,7 @@
   const SETTINGS_KEY = `${APP_PREFIX}:settings:v1`;
   const USAGE_KEY = `${APP_PREFIX}:usage:v1`;
   const OPENROUTER_PRICES_KEY = `${APP_PREFIX}:openrouter-prices:v1`;
+  const OPENAI_ADMIN_SESSION_KEY = `${APP_PREFIX}:openai-admin-key`;
   const TREE_ZOOM_KEY = `${APP_PREFIX}:tree-zoom`;
   const THEME_KEY = `${APP_PREFIX}:theme`;
   const FILE_REQUEST_LIMIT = 50 * 1024 * 1024;
@@ -49,14 +50,17 @@
     nodeCount: $('#node-count'), branchCount: $('#branch-count'), branchContext: $('#branch-context'),
     branchLabel: $('#branch-label'), selectionMenu: $('#selection-menu'), selectionPreview: $('#selection-preview'),
     selectionAction: $('#selection-action'), selectionCustom: $('#selection-custom'), settings: $('#settings-dialog'),
-    openaiApiKey: $('#openai-api-key'), openrouterApiKey: $('#openrouter-api-key'), modelConfigs: $('#model-configs'),
+    openaiApiKey: $('#openai-api-key'), openrouterApiKey: $('#openrouter-api-key'), openaiAdminKey: $('#openai-admin-key'), modelConfigs: $('#model-configs'),
     openaiModelOptions: $('#openai-model-options'), openrouterModelOptions: $('#openrouter-model-options'),
     systemPrompt: $('#system-prompt'),
     keyStatus: $('#key-status'), toast: $('#toast'), usageDialog: $('#usage-dialog'),
     monthTokens: $('#month-tokens'), usageMonth: $('#usage-month'), usageTotal: $('#usage-total'),
     usageCost: $('#usage-cost'), usageRequests: $('#usage-requests'), usageInput: $('#usage-input'),
     usageCached: $('#usage-cached'), usageOutput: $('#usage-output'), usageModels: $('#usage-models'),
-    usageRecent: $('#usage-recent'), usageNote: $('#usage-note'), usageDashboard: $('#usage-dashboard'), historyList: $('#history-list'),
+    usageRecent: $('#usage-recent'), usageNote: $('#usage-note'), historyList: $('#history-list'),
+    actualOpenAICost: $('#actual-openai-cost'), actualOpenAIStatus: $('#actual-openai-status'),
+    actualOpenRouterCost: $('#actual-openrouter-cost'), actualOpenRouterStatus: $('#actual-openrouter-status'),
+    actualCombinedCost: $('#actual-combined-cost'), actualCombinedStatus: $('#actual-combined-status'),
     historyEmpty: $('#history-empty'), historyToggle: $('#toggle-history'),
     attachments: $('#attachments'), uploadFile: $('#upload-file'), fileInput: $('#file-input'),
     activeConnection: $('#active-connection'), activeModel: $('#active-model'), activeProvider: $('#active-provider'),
@@ -83,6 +87,8 @@
   let pendingGTimer = 0;
   let treeZoom = loadTreeZoom();
   let installPrompt = null;
+  let actualSpendRequest = 0;
+  let modelPriceTimer = 0;
 
   function loadJSON(key, fallback) {
     try { return JSON.parse(localStorage.getItem(key) || 'null') || fallback; }
@@ -936,6 +942,8 @@
     });
     els.openaiApiKey.value = settingsDraft.apiKeys.openai || '';
     els.openrouterApiKey.value = settingsDraft.apiKeys.openrouter || '';
+    try { els.openaiAdminKey.value = sessionStorage.getItem(OPENAI_ADMIN_SESSION_KEY) || ''; }
+    catch { els.openaiAdminKey.value = ''; }
     fillModelOptions(els.openaiModelOptions, PROVIDERS.openai.models);
     fillModelOptions(els.openrouterModelOptions, PROVIDERS.openrouter.models);
     renderModelCards();
@@ -969,6 +977,7 @@
             <input class="model-name-input" type="text" value="${escapeHTML(connection.model)}" placeholder="${escapeHTML(defaults.model)}" list="${connection.provider}-model-options" spellcheck="false" required>
           </label>
         </div>
+        <div class="model-price" aria-live="polite">Checking pricing…</div>
         <details class="provider-advanced">
           <summary>Endpoint</summary>
           <label>Responses API endpoint
@@ -978,6 +987,7 @@
         <button class="remove-model" type="button"${settingsDraft.models.length === 1 ? ' disabled' : ''} aria-label="Remove model ${index + 1}">Remove model</button>
       </section>`;
     }).join('');
+    updateAllModelPrices();
   }
 
   function captureSettingsForm() {
@@ -995,6 +1005,11 @@
     });
     settingsDraft.activeModelId = $('input[name="default-model"]:checked', els.modelConfigs)?.value
       || settingsDraft.models[0]?.id;
+    try {
+      const adminKey = els.openaiAdminKey.value.trim();
+      if (adminKey) sessionStorage.setItem(OPENAI_ADMIN_SESSION_KEY, adminKey);
+      else sessionStorage.removeItem(OPENAI_ADMIN_SESSION_KEY);
+    } catch {}
   }
 
   function updateModelCardSelection() {
@@ -1042,6 +1057,37 @@
     return MODEL_PRICES.find(price => price.match.test(key)) || null;
   }
 
+  function formatModelRate(value) {
+    if (!Number.isFinite(value)) return 'Unavailable';
+    return value.toLocaleString(undefined, {
+      style: 'currency', currency: 'USD', minimumFractionDigits: 2, maximumFractionDigits: 6
+    });
+  }
+
+  async function updateModelPrice(card) {
+    if (!card) return;
+    const preview = $('.model-price', card);
+    const provider = $('.model-provider', card)?.value;
+    const model = $('.model-name-input', card)?.value.trim();
+    if (!preview) return;
+    preview.classList.remove('unavailable');
+    if (!model) { preview.textContent = 'Enter a model name to see pricing.'; return; }
+    preview.textContent = provider === 'openrouter' ? 'Checking OpenRouter pricing…' : 'Checking pricing…';
+    const price = provider === 'openrouter' ? await openRouterPriceForModel(model) : priceForModel(model);
+    if (!card.isConnected || $('.model-provider', card)?.value !== provider || $('.model-name-input', card)?.value.trim() !== model) return;
+    if (!price) {
+      preview.textContent = 'Pricing unavailable for this model.';
+      preview.classList.add('unavailable');
+      return;
+    }
+    preview.classList.remove('unavailable');
+    preview.innerHTML = `<span>Input <strong>${formatModelRate(price.input)}</strong></span><span>Output <strong>${formatModelRate(price.output)}</strong></span><small>per 1M tokens</small>`;
+  }
+
+  function updateAllModelPrices() {
+    els.modelConfigs.querySelectorAll('[data-model-card]').forEach(card => updateModelPrice(card));
+  }
+
   function isOpenAIEndpoint(apiUrl) {
     try { return new URL(apiUrl).hostname === 'api.openai.com'; }
     catch { return false; }
@@ -1059,7 +1105,8 @@
         headers: { 'Accept': 'application/json' }
       });
       if (!response.ok) return validCached ? cached : null;
-      const pricing = (await response.json()).data?.pricing;
+      const rawPricing = (await response.json()).data?.pricing;
+      const pricing = Array.isArray(rawPricing) ? rawPricing[0] : rawPricing;
       const prompt = pricing?.prompt == null ? NaN : Number(pricing.prompt);
       const completion = pricing?.completion == null ? NaN : Number(pricing.completion);
       const cacheRead = pricing?.input_cache_read == null ? NaN : Number(pricing.input_cache_read);
@@ -1128,6 +1175,15 @@
     return value.toLocaleString(undefined, { style: 'currency', currency: 'USD', minimumFractionDigits: 2, maximumFractionDigits: value < 1 ? 4 : 2 });
   }
 
+  function formatDetailedCost(value) {
+    if (!Number.isFinite(value)) return 'Unpriced';
+    if (value === 0) return '$0.00';
+    const decimalPlaces = value > 0 && value < .01 ? 10 : (value < 1 ? 4 : 2);
+    return value.toLocaleString(undefined, {
+      style: 'currency', currency: 'USD', minimumFractionDigits: 2, maximumFractionDigits: decimalPlaces
+    });
+  }
+
   function updateUsageButton() {
     const total = sum(currentMonthRecords(), 'totalTokens');
     els.monthTokens.textContent = formatTokens(total, true);
@@ -1173,9 +1229,12 @@
 
     els.usageRecent.innerHTML = records.length ? records.slice(0, 12).map(record => `
       <div class="usage-row">
-        <span class="model-name">${new Date(record.timestamp).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}</span>
+        <span class="recent-request-copy">
+          <span class="request-date">${new Date(record.timestamp).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}</span>
+          <span class="model-name" title="${escapeHTML(record.model || 'unknown')}">${escapeHTML(record.model || 'unknown')}</span>
+        </span>
         <span class="row-tokens">${formatTokens(record.totalTokens)} tokens</span>
-        <span class="row-cost">${formatCost(record.costUSD)}</span>
+        <span class="row-cost">${formatDetailedCost(record.costUSD)}</span>
       </div>`).join('') : '<p class="usage-empty">Completed requests will appear here.</p>';
 
     els.usageNote.textContent = unpriced
@@ -1183,12 +1242,104 @@
       : 'Estimates use the rate recorded when each request completed: the local OpenAI table or OpenRouter\'s model-pricing API.';
   }
 
+  function monthStartUnix() {
+    const now = new Date();
+    return Math.floor(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1) / 1000);
+  }
+
+  async function responseError(response, fallback) {
+    try {
+      const data = await response.json();
+      return data.error?.message || data.message || fallback;
+    } catch { return fallback; }
+  }
+
+  async function fetchOpenAIActualSpend(adminKey) {
+    let page = '';
+    let total = 0;
+    let pages = 0;
+    do {
+      const params = new URLSearchParams({
+        start_time: String(monthStartUnix()),
+        end_time: String(Math.floor(Date.now() / 1000) + 1),
+        bucket_width: '1d', limit: '31'
+      });
+      if (page) params.set('page', page);
+      const response = await fetch(`https://api.openai.com/v1/organization/costs?${params}`, {
+        headers: { 'Authorization': `Bearer ${adminKey}`, 'Content-Type': 'application/json' }
+      });
+      if (!response.ok) throw new Error(await responseError(response, `OpenAI billing request failed (${response.status})`));
+      const data = await response.json();
+      for (const bucket of data.data || []) {
+        for (const result of bucket.results || []) {
+          if (result.amount?.currency && result.amount.currency !== 'usd') continue;
+          total += Number(result.amount?.value) || 0;
+        }
+      }
+      page = data.has_more ? String(data.next_page || '') : '';
+      pages += 1;
+    } while (page && pages < 10);
+    return total;
+  }
+
+  async function fetchOpenRouterActualSpend(apiKey) {
+    const response = await fetch('https://openrouter.ai/api/v1/key', {
+      headers: { 'Authorization': `Bearer ${apiKey}`, 'Accept': 'application/json' }
+    });
+    if (!response.ok) throw new Error(await responseError(response, `OpenRouter billing request failed (${response.status})`));
+    const value = Number((await response.json()).data?.usage_monthly);
+    if (!Number.isFinite(value)) throw new Error('OpenRouter did not return month-to-date usage for this key.');
+    return value;
+  }
+
+  function setActualSpendState(provider, state, detail = '') {
+    const cost = provider === 'openai' ? els.actualOpenAICost : els.actualOpenRouterCost;
+    const status = provider === 'openai' ? els.actualOpenAIStatus : els.actualOpenRouterStatus;
+    status.classList.toggle('error', state === 'error');
+    if (state === 'loading') { cost.textContent = '…'; status.textContent = 'Contacting provider…'; }
+    else if (state === 'missing') { cost.textContent = '—'; status.textContent = detail; }
+    else if (state === 'error') { cost.textContent = '—'; status.textContent = detail; }
+    else { cost.textContent = formatCost(detail); status.textContent = 'Retrieved just now'; }
+  }
+
+  async function refreshActualSpend() {
+    const requestId = ++actualSpendRequest;
+    const refreshButton = $('#refresh-actual-spend');
+    const openRouterKey = settings.apiKeys.openrouter;
+    let openAIAdminKey = '';
+    try { openAIAdminKey = sessionStorage.getItem(OPENAI_ADMIN_SESSION_KEY) || ''; } catch {}
+    const tasks = [];
+    const totals = {};
+
+    if (openAIAdminKey) {
+      setActualSpendState('openai', 'loading');
+      tasks.push(fetchOpenAIActualSpend(openAIAdminKey)
+        .then(value => { totals.openai = value; if (requestId === actualSpendRequest) setActualSpendState('openai', 'ready', value); })
+        .catch(error => { if (requestId === actualSpendRequest) setActualSpendState('openai', 'error', error.message); }));
+    } else setActualSpendState('openai', 'missing', 'Add an Admin API key in Settings');
+
+    if (openRouterKey) {
+      setActualSpendState('openrouter', 'loading');
+      tasks.push(fetchOpenRouterActualSpend(openRouterKey)
+        .then(value => { totals.openrouter = value; if (requestId === actualSpendRequest) setActualSpendState('openrouter', 'ready', value); })
+        .catch(error => { if (requestId === actualSpendRequest) setActualSpendState('openrouter', 'error', error.message); }));
+    } else setActualSpendState('openrouter', 'missing', 'Add an OpenRouter API key in Settings');
+
+    refreshButton.disabled = true;
+    els.actualCombinedCost.textContent = '…';
+    els.actualCombinedStatus.textContent = 'Retrieving available totals…';
+    await Promise.all(tasks);
+    if (requestId !== actualSpendRequest) return;
+    refreshButton.disabled = false;
+    const available = Object.values(totals);
+    els.actualCombinedCost.textContent = available.length ? formatCost(available.reduce((sum, value) => sum + value, 0)) : '—';
+    els.actualCombinedStatus.textContent = available.length === 2 ? 'Both providers' : available.length ? 'One provider available' : 'No provider totals available';
+  }
+
   function openUsage() {
     renderUsage();
-    const openRouter = settings.provider === 'openrouter';
-    els.usageDashboard.href = openRouter ? 'https://openrouter.ai/activity' : 'https://platform.openai.com/usage';
-    els.usageDashboard.textContent = `${openRouter ? 'OpenRouter' : 'OpenAI'} dashboard ↗`;
     els.usageDialog.showModal();
+    refreshActualSpend();
   }
 
   function createNewMap() {
@@ -1482,6 +1633,7 @@
   $('#open-settings').addEventListener('click', openSettings);
   els.activeConnection.addEventListener('click', openSettings);
   $('#open-usage').addEventListener('click', openUsage);
+  $('#refresh-actual-spend').addEventListener('click', refreshActualSpend);
   $('#theme-toggle').addEventListener('click', toggleTheme);
   $('#toggle-history').addEventListener('click', toggleHistory);
   els.conversationSearch.addEventListener('input', () => {
@@ -1520,7 +1672,8 @@
     const show = input.type === 'password';
     input.type = show ? 'text' : 'password';
     event.currentTarget.textContent = show ? 'Hide' : 'Show';
-    event.currentTarget.setAttribute('aria-label', `${show ? 'Hide' : 'Show'} ${input.id === 'openrouter-api-key' ? 'OpenRouter' : 'OpenAI'} API key`);
+    const keyName = input.id === 'openrouter-api-key' ? 'OpenRouter' : input.id === 'openai-admin-key' ? 'OpenAI Admin' : 'OpenAI';
+    event.currentTarget.setAttribute('aria-label', `${show ? 'Hide' : 'Show'} ${keyName} API key`);
   }));
   $('#add-model').addEventListener('click', () => {
     captureSettingsForm();
@@ -1541,6 +1694,14 @@
     if (connection.apiUrl === PROVIDERS[previousProvider].apiUrl) connection.apiUrl = PROVIDERS[provider].apiUrl;
     connection.provider = provider;
     renderModelCards();
+  });
+  els.modelConfigs.addEventListener('input', event => {
+    if (!event.target.matches('.model-name-input')) return;
+    const card = event.target.closest('[data-model-card]');
+    const preview = $('.model-price', card);
+    if (preview) preview.textContent = 'Checking pricing…';
+    clearTimeout(modelPriceTimer);
+    modelPriceTimer = setTimeout(() => updateModelPrice(card), 350);
   });
   els.modelConfigs.addEventListener('click', event => {
     const button = event.target.closest('.remove-model');

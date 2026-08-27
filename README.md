@@ -26,6 +26,8 @@ other:
 - responsive concept map for desktop and small screens
 - persistent light/dark theme with system-theme detection
 - monthly token tracking with per-model details and a local billing estimate
+- month-to-date actual spend retrieved from the OpenAI organization Costs API and the configured OpenRouter key
+- live input and output token pricing beside model names in Settings
 - independent chat-history clearing and per-conversation deletion
 - multiple persistent maps with a browsable conversation sidebar
 - per-map PDF and Markdown context, uploaded once through the Files API
@@ -67,6 +69,8 @@ Open the local URL printed by `serve`.
 5. Save and ask a question.
 
 Settings stores the OpenAI and OpenRouter API keys once at the top. Model cards below can independently choose a provider, model ID, and endpoint; one card is selected as the default connection. A fresh installation starts with one OpenAI model card, and **+ Add model** creates more.
+
+The usage dialog can retrieve actual month-to-date provider spend. OpenRouter uses the configured API key and reports spend for that key. OpenAI's organization Costs API requires a separate Admin API key created by an organization owner; because that key has elevated privileges, Study Lab keeps it only in `sessionStorage` for the current browser tab rather than in persistent local storage. Provider-reported totals may lag recent requests and can differ from invoices because of taxes, credit-purchase fees, or other adjustments.
 
 To add reference material, choose **+ PDF / MD** beside the composer and select one or more PDF or Markdown (`.md`) files. The files are attached to the current map and included with questions sent through the same provider, including questions asked from older branches. Each file must be under 50 MB, and files attached through one provider in a map must total under 50 MB.
 

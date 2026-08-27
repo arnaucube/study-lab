@@ -201,6 +201,14 @@
               <button class="toggle-key" type="button" data-key-input="openrouter-api-key" aria-label="Show OpenRouter API key">Show</button>
             </div>
           </label>
+          <label class="admin-key-setting">
+            OpenAI Admin API key <span class="optional-label">billing only</span>
+            <div class="secret-field">
+              <input id="openai-admin-key" type="password" placeholder="sk-admin-…" autocomplete="off" spellcheck="false">
+              <button class="toggle-key" type="button" data-key-input="openai-admin-key" aria-label="Show OpenAI Admin API key">Show</button>
+            </div>
+            <small class="field-help">Required for actual organization spend. Kept only for this browser tab and never saved to local storage.</small>
+          </label>
         </div>
       </section>
       <div class="model-settings-heading">
@@ -217,7 +225,7 @@
           <textarea id="system-prompt" rows="3">You are a patient technical tutor. Use clear Markdown and LaTeX where useful. Use mathematical language, assume graduate level knowledge. Build on the conversation context and explain assumptions.</textarea>
         </label>
       </details>
-      <div class="security-callout"><strong>Local-use note</strong> — any script running on this origin can access local storage. Use a restricted API key and never deploy this frontend publicly with a saved key.</div>
+      <div class="security-callout"><strong>Local-use note</strong> — any script running on this origin can access browser storage. Use restricted inference keys, treat an OpenAI Admin key as highly privileged, and never deploy this frontend publicly with saved keys.</div>
       <div class="dialog-actions">
         <button id="clear-history" class="button button-ghost danger" type="button">Clear chat history</button>
         <button class="button button-dark" value="save" type="submit">Save settings</button>
@@ -229,12 +237,44 @@
     <form method="dialog">
       <div class="dialog-heading">
         <div>
-          <span class="eyebrow">Local estimate</span>
+          <span class="eyebrow">Provider billing</span>
           <h2>API usage</h2>
         </div>
         <button id="close-usage" class="icon-button" type="button" aria-label="Close API usage">×</button>
       </div>
-      <p class="settings-copy"><span id="usage-month"></span> · Requests made from this browser</p>
+      <p class="settings-copy"><span id="usage-month"></span> · Month to date</p>
+
+      <section class="actual-spend" aria-labelledby="actual-spend-title">
+        <div class="usage-section-heading">
+          <div>
+            <h3 id="actual-spend-title">Actual provider spend</h3>
+            <p>Retrieved directly from each provider.</p>
+          </div>
+          <button id="refresh-actual-spend" class="button button-ghost" type="button">Refresh</button>
+        </div>
+        <div class="actual-spend-grid" aria-live="polite">
+          <div class="actual-spend-card">
+            <span>OpenAI organization</span>
+            <strong id="actual-openai-cost">—</strong>
+            <small id="actual-openai-status">Admin key required</small>
+          </div>
+          <div class="actual-spend-card">
+            <span>OpenRouter API key</span>
+            <strong id="actual-openrouter-cost">—</strong>
+            <small id="actual-openrouter-status">API key required</small>
+          </div>
+          <div class="actual-spend-card total">
+            <span>Combined available</span>
+            <strong id="actual-combined-cost">—</strong>
+            <small id="actual-combined-status">Waiting to refresh</small>
+          </div>
+        </div>
+        <p class="actual-spend-note">OpenAI reports organization-wide costs and requires an organization-owner Admin API key. OpenRouter reports usage for the configured API key.</p>
+      </section>
+
+      <div class="usage-section-heading local-usage-heading">
+        <div><h3>Local browser estimate</h3><p>Only completed requests recorded by Study Lab in this browser.</p></div>
+      </div>
 
       <div class="usage-summary">
         <div class="usage-stat primary">
@@ -271,10 +311,11 @@
       </section>
 
       <p id="usage-note" class="usage-note"></p>
-      <p class="usage-disclaimer">This is not your OpenAI invoice. It excludes requests from other browsers and applications, incomplete requests without returned usage, taxes, credits, tools, special processing, and usage recorded before this tracker was added. Prices can change.</p>
+      <p class="usage-disclaimer">Provider totals can lag behind recent requests and may exclude taxes, credit-purchase fees, or other invoice adjustments. The local estimate excludes requests from other browsers and applications, incomplete requests without returned usage, and usage recorded before this tracker was added.</p>
       <div class="dialog-actions">
         <button id="reset-usage" class="button button-ghost danger" type="button">Reset local history</button>
-        <a id="usage-dashboard" class="button button-ghost usage-dashboard" href="https://platform.openai.com/usage" target="_blank" rel="noopener noreferrer">OpenAI dashboard ↗</a>
+        <a class="button button-ghost usage-dashboard" href="https://platform.openai.com/usage" target="_blank" rel="noopener noreferrer">OpenAI ↗</a>
+        <a class="button button-ghost usage-dashboard" href="https://openrouter.ai/activity" target="_blank" rel="noopener noreferrer">OpenRouter ↗</a>
         <button class="button button-dark" value="close" type="submit">Done</button>
       </div>
     </form>
