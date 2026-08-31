@@ -202,6 +202,15 @@ body.history-collapsed .composer-wrap { left: 0; }
 @keyframes spin { to { transform: rotate(360deg); } }
 .hint { font-size: .68rem; color: #8b918e; }
 kbd { font-family: inherit; border: 1px solid var(--line); border-bottom-width: 2px; border-radius: 4px; padding: 1px 4px; background: #fafafa; }
+.composer-actions { flex: 0 0 auto; display: flex; align-items: center; gap: 10px; }
+.short-mode { display: flex; align-items: center; gap: 6px; color: var(--muted); cursor: pointer; font-size: .68rem; font-weight: 700; user-select: none; }
+.short-mode input { position: absolute; width: 1px; height: 1px; overflow: hidden; opacity: 0; pointer-events: none; }
+.short-mode-track { position: relative; width: 30px; height: 18px; border: 1px solid var(--line); border-radius: 999px; background: var(--paper); transition: background .15s, border-color .15s; }
+.short-mode-track span { position: absolute; top: 2px; left: 2px; width: 12px; height: 12px; border-radius: 50%; background: var(--muted); transition: transform .15s, background .15s; }
+.short-mode input:checked + .short-mode-track { border-color: var(--sage-dark); background: var(--sage-dark); }
+.short-mode input:checked + .short-mode-track span { background: white; transform: translateX(12px); }
+.short-mode input:focus-visible + .short-mode-track { outline: 2px solid var(--sage-dark); outline-offset: 2px; }
+.short-mode:has(input:disabled) { opacity: .45; cursor: default; }
 .send { border: 0; width: 34px; height: 34px; display: grid; place-items: center; border-radius: 10px; background: var(--ink); color: white; cursor: pointer; font-size: 1.15rem; }
 .send:disabled { opacity: .35; cursor: default; }
 .privacy-note { max-width: 850px; margin: 7px auto 0; text-align: center; color: #8b918e; font-size: .66rem; }
@@ -425,6 +434,7 @@ body.map-collapsed .composer-wrap { right: 0; }
 :root[data-theme="dark"] .mini-action:hover { background: #252d29; }
 :root[data-theme="dark"] .composer { background: var(--card); border-color: #3a4640; box-shadow: 0 9px 32px rgba(0,0,0,.22); }
 :root[data-theme="dark"] .composer-wrap { background: linear-gradient(transparent, var(--paper) 22%, var(--paper)); }
+:root[data-theme="dark"] .short-mode-track { background: #252c29; }
 :root[data-theme="dark"] kbd { background: #252c29; }
 :root[data-theme="dark"] .branch-context { background: #223029; border-color: #35493f; }
 :root[data-theme="dark"] .icon-button { background: rgba(255,255,255,.035); }

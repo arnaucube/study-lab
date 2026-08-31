@@ -118,7 +118,14 @@
               </button>
               <span class="hint"><kbd>Enter</kbd> send · <kbd>Shift</kbd> + <kbd>Enter</kbd> new line</span>
             </div>
-            <button id="send" class="send" type="submit" aria-label="Send message">↑</button>
+            <div class="composer-actions">
+              <label class="short-mode" title="Ask for concise answers">
+                <span>Short answer</span>
+                <input id="short-mode" type="checkbox" role="switch" aria-label="Short answer mode">
+                <span class="short-mode-track" aria-hidden="true"><span></span></span>
+              </label>
+              <button id="send" class="send" type="submit" aria-label="Send message">↑</button>
+            </div>
           </div>
           <input id="file-input" type="file" accept="application/pdf,text/markdown,.pdf,.md" multiple hidden>
         </form>

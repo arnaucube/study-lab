@@ -9,6 +9,8 @@
   const OPENAI_ADMIN_SESSION_KEY = `${APP_PREFIX}:openai-admin-key`;
   const TREE_ZOOM_KEY = `${APP_PREFIX}:tree-zoom`;
   const THEME_KEY = `${APP_PREFIX}:theme`;
+  const SHORT_MODE_KEY = `${APP_PREFIX}:short-mode`;
+  const SHORT_MODE_INSTRUCTION = 'Answer concisely, focusing only on the essential points.';
   const FILE_REQUEST_LIMIT = 50 * 1024 * 1024;
   const PRICE_CACHE_TTL = 24 * 60 * 60 * 1000;
   const PROVIDERS = {
@@ -46,7 +48,7 @@
   const $ = (selector, root = document) => root.querySelector(selector);
   const els = {
     welcome: $('#welcome'), conversation: $('#conversation'), composer: $('#composer'),
-    prompt: $('#prompt'), send: $('#send'), tree: $('#tree'), mapEmpty: $('#map-empty'),
+    prompt: $('#prompt'), send: $('#send'), shortMode: $('#short-mode'), tree: $('#tree'), mapEmpty: $('#map-empty'),
     nodeCount: $('#node-count'), branchCount: $('#branch-count'), branchContext: $('#branch-context'),
     branchLabel: $('#branch-label'), selectionMenu: $('#selection-menu'), selectionPreview: $('#selection-preview'),
     selectionAction: $('#selection-action'), selectionCustom: $('#selection-custom'), settings: $('#settings-dialog'),
@@ -86,6 +88,7 @@
   let pendingG = false;
   let pendingGTimer = 0;
   let treeZoom = loadTreeZoom();
+  let shortMode = localStorage.getItem(SHORT_MODE_KEY) === 'true';
   let installPrompt = null;
   let actualSpendRequest = 0;
   let modelPriceTimer = 0;
@@ -736,7 +739,11 @@
     }
   }
 
-  function inputFor(map, parentId, question, provider = settings.provider) {
+  function questionForRequest(question, concise = false) {
+    return concise ? `${question}\n\n${SHORT_MODE_INSTRUCTION}` : question;
+  }
+
+  function inputFor(map, parentId, question, provider = settings.provider, concise = false) {
     const messages = [];
     for (const node of pathTo(parentId, map)) {
       if (provider === 'openrouter') {
@@ -755,9 +762,10 @@
       .map(file => file.kind === 'markdown'
         ? { type: 'input_file', file_id: file.id }
         : { type: 'input_file', file_id: file.id, detail: file.detail || 'low' });
-    content.push({ type: 'input_text', text: question });
+    const requestQuestion = questionForRequest(question, concise);
+    content.push({ type: 'input_text', text: requestQuestion });
     const structured = provider === 'openrouter' || content.length > 1;
-    messages.push(structured ? { type: 'message', role: 'user', content } : { role: 'user', content: question });
+    messages.push(structured ? { type: 'message', role: 'user', content } : { role: 'user', content: requestQuestion });
     return messages;
   }
 
@@ -847,6 +855,7 @@
 
     const requestMap = state;
     const connection = { ...settings };
+    const concise = shortMode;
     const node = {
       id: uid(), parentId: parentId || null, question, answer: '', status: 'loading', createdAt: Date.now(),
       provider: connection.provider, model: connection.model
@@ -867,7 +876,7 @@
       const response = await fetch(connection.apiUrl, {
         method: 'POST',
         headers: requestHeaders(true, connection),
-        body: JSON.stringify({ model: connection.model, instructions: connection.systemPrompt, input: inputFor(requestMap, parentId, question, connection.provider), stream: true }),
+        body: JSON.stringify({ model: connection.model, instructions: connection.systemPrompt, input: inputFor(requestMap, parentId, question, connection.provider, concise), stream: true }),
         signal: controller.signal
       });
       if (!response.ok) {
@@ -931,6 +940,7 @@
 
   function setBusy(busy) {
     els.prompt.disabled = busy;
+    els.shortMode.disabled = busy;
     els.send.textContent = busy ? '■' : '↑';
     els.send.setAttribute('aria-label', busy ? 'Stop response' : 'Send message');
     els.uploadFile.disabled = busy || uploadingFiles;
@@ -1571,6 +1581,11 @@
   els.prompt.addEventListener('input', () => {
     els.prompt.style.height = 'auto';
     els.prompt.style.height = `${Math.min(els.prompt.scrollHeight, 180)}px`;
+  });
+  els.shortMode.checked = shortMode;
+  els.shortMode.addEventListener('change', () => {
+    shortMode = els.shortMode.checked;
+    localStorage.setItem(SHORT_MODE_KEY, String(shortMode));
   });
   document.addEventListener('click', event => {
     const starter = event.target.closest('.starter');
