@@ -60,6 +60,9 @@ button { color: inherit; }
 .history-toggle { display: grid; place-items: center; width: 34px; height: 34px; border: 1px solid var(--line); border-radius: 9px; background: transparent; cursor: pointer; font-size: 1rem; }
 .history-toggle:hover { background: var(--card); }
 .top-actions { display: flex; align-items: center; gap: 8px; }
+.export-button { height: 34px; padding: 0 12px; border: 1px solid var(--line); border-radius: 999px; background: var(--card); color: var(--ink); cursor: pointer; font-size: .7rem; font-weight: 750; white-space: nowrap; }
+.export-button[hidden] { display: none; }
+.export-button:hover { border-color: var(--sage); transform: translateY(-1px); }
 .install-button { height: 34px; padding: 0 12px; border: 0; border-radius: 999px; background: var(--sage-dark); color: #fff; cursor: pointer; font-size: .7rem; font-weight: 750; white-space: nowrap; }
 .install-button:hover { filter: brightness(1.08); }
 .github-button { display: grid; place-items: center; width: 34px; height: 34px; border: 1px solid var(--line); border-radius: 50%; color: var(--ink); background: transparent; transition: transform .15s, background .15s; }
@@ -455,3 +458,40 @@ body.map-collapsed .composer-wrap { right: 0; }
 :root[data-theme="dark"] .error-text { color: #f0aaa2; background: #3c2422; }
 :root[data-theme="dark"] .usage-stat.primary { background: #223029; border-color: #35493f; }
 :root[data-theme="dark"] .usage-note { background: #1a211e; }
+
+@media print {
+  @page { margin: 18mm 16mm; }
+
+  :root, :root[data-theme="dark"] {
+    --ink: #18201d;
+    --muted: #5f6864;
+    --paper: #fff;
+    --card: #fff;
+    --line: #d9d9d0;
+    --sage-dark: #4f6d60;
+    color-scheme: light;
+  }
+
+  html, body { height: auto; background: #fff !important; }
+  body { color: #18201d !important; print-color-adjust: exact; -webkit-print-color-adjust: exact; }
+  .topbar, .history-panel, .map-panel, .expand-map, .composer-wrap,
+  .selection-menu, dialog, .toast, .answer-actions { display: none !important; }
+  .app-shell { min-height: 0; padding: 0; }
+  .workspace { display: block; min-height: 0; margin: 0; }
+  .welcome { display: none !important; }
+  .conversation { display: block; width: 100%; margin: 0; padding: 0; }
+  .message { margin: 0 0 12mm; }
+  .question-row { break-after: avoid; page-break-after: avoid; }
+  .question-bubble { background: #e7ebe7 !important; }
+  .answer { break-before: avoid; page-break-before: avoid; }
+  .answer-mark { background: #18201d !important; color: #fff !important; }
+  .answer-body { font-size: 10.5pt; }
+  .answer-body pre { white-space: pre-wrap; overflow-wrap: anywhere; background: #202724 !important; color: #f3f5f2 !important; }
+  .answer-body code { background: #eaeae4 !important; }
+  .answer-body pre code { background: transparent !important; }
+  .answer-body .table-scroll { overflow: visible; }
+  .answer-body table { background: #fff !important; }
+  .answer-body th { background: #e5e9e4 !important; }
+  .answer-body tbody tr:nth-child(even) { background: #f3f4f1 !important; }
+  a { color: inherit; }
+}

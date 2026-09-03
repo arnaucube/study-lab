@@ -67,7 +67,7 @@
     attachments: $('#attachments'), uploadFile: $('#upload-file'), fileInput: $('#file-input'),
     activeConnection: $('#active-connection'), activeModel: $('#active-model'), activeProvider: $('#active-provider'),
     conversationSearch: $('#conversation-search'), searchResults: $('#search-results'),
-    treeZoom: $('#tree-zoom'), shortcutsDialog: $('#shortcuts-dialog')
+    treeZoom: $('#tree-zoom'), shortcutsDialog: $('#shortcuts-dialog'), exportPdf: $('#export-pdf')
   };
 
   migrateLegacyStorage();
@@ -458,6 +458,7 @@
     const path = pathTo(state.activeId);
     els.welcome.hidden = path.length > 0;
     els.conversation.hidden = path.length === 0;
+    els.exportPdf.hidden = path.length === 0;
     const fragment = document.createDocumentFragment();
     for (const node of path) {
       const article = document.createElement('article');
@@ -1567,6 +1568,14 @@
 
   function hideSelectionMenu() { els.selectionMenu.hidden = true; selectedText = null; }
 
+  function exportCurrentBranch() {
+    if (!pathTo(state.activeId).length) { showToast('Select a branch to export'); return; }
+    const previousTitle = document.title;
+    document.title = `${state.title || 'Study Lab'} — selected branch`;
+    addEventListener('afterprint', () => { document.title = previousTitle; }, { once: true });
+    window.print();
+  }
+
   els.composer.addEventListener('submit', event => {
     event.preventDefault();
     if (activeRequest) { activeRequest.abort(); return; }
@@ -1650,6 +1659,7 @@
   $('#open-usage').addEventListener('click', openUsage);
   $('#refresh-actual-spend').addEventListener('click', refreshActualSpend);
   $('#theme-toggle').addEventListener('click', toggleTheme);
+  els.exportPdf.addEventListener('click', exportCurrentBranch);
   $('#toggle-history').addEventListener('click', toggleHistory);
   els.conversationSearch.addEventListener('input', () => {
     clearTimeout(searchTimer);
