@@ -38,6 +38,8 @@ other:
 
 ![Study Lab main view showing a branching conversation](screenshots/main%20view.png)
 
+![Study Lab main view showing a branching conversation (light)](screenshots/main%20view%20-%20light.png)
+
 ## Run locally
 
 You need a modern browser, an internet connection, and either an [OpenAI API key](https://platform.openai.com/api-keys) or an [OpenRouter API key](https://openrouter.ai/settings/keys). A ChatGPT subscription/password is not an OpenAI API key.
@@ -50,31 +52,6 @@ python3 -m http.server 8080
 
 Then open <http://localhost:8080>.
 
-### Install on Android
-
-Serve Study Lab over HTTPS (or use `localhost` while testing), open it in Chrome on Android, and choose **Install app** when the button appears. You can also use Chrome's menu and choose **Install app** or **Add to Home screen**. The installed app opens in its own window and caches its local interface for offline startup; sending AI requests still requires an internet connection.
-
-Alternatively, with Node.js:
-
-```bash
-npx --yes serve .
-```
-
-Open the local URL printed by `serve`.
-
-1. Choose **Settings**.
-2. Paste the API key for each provider you plan to use.
-3. Add model cards, choose OpenAI or OpenRouter on each card, and enter any model ID available to that account. OpenRouter model IDs use the `provider/model` form, such as `openai/gpt-5-mini`.
-4. Select the radio button on the model card that should be used by default.
-5. Save and ask a question.
-
-Settings stores the OpenAI and OpenRouter API keys once at the top. Model cards below can independently choose a provider, model ID, and endpoint; one card is selected as the default connection. A fresh installation starts with one OpenAI model card, and **+ Add model** creates more.
-
-The usage dialog can retrieve actual month-to-date provider spend. OpenRouter uses the configured API key and reports spend for that key. OpenAI's organization Costs API requires a separate Admin API key created by an organization owner; because that key has elevated privileges, Study Lab keeps it only in `sessionStorage` for the current browser tab rather than in persistent local storage. Provider-reported totals may lag recent requests and can differ from invoices because of taxes, credit-purchase fees, or other adjustments.
-
-To add reference material, choose **+ PDF / MD** beside the composer and select one or more PDF or Markdown (`.md`) files. The files are attached to the current map and included with questions sent through the same provider, including questions asked from older branches. Each file must be under 50 MB, and files attached through one provider in a map must total under 50 MB.
-
-The endpoint on each model card is configurable under **Endpoint**. OpenAI defaults to `https://api.openai.com/v1/responses`; OpenRouter defaults to `https://openrouter.ai/api/v1/responses`.
 
 ## How branching works
 

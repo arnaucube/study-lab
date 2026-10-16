@@ -39,11 +39,11 @@ function onStroke(x, y, points, radius) {
 }
 
 function sample(x, y, maskable) {
-  const paper = [248, 247, 242];
-  const sage = [79, 109, 96];
-  const ink = [24, 32, 29];
-  const orange = [233, 133, 87];
-  let color = maskable ? sage : paper;
+  const paper = [255, 255, 255];
+  const accent = [63, 63, 63];
+  const ink = [32, 32, 32];
+  const highlight = [128, 128, 128];
+  let color = maskable ? accent : paper;
   const blob = ((x - 256) / 162) ** 2 + ((y - 258) / 181) ** 2 <= 1;
   if (blob) color = ink;
 
@@ -53,7 +53,7 @@ function sample(x, y, maskable) {
     [287, 361], [245, 369], [207, 358], [184, 335]
   ];
   if (blob && onStroke(x, y, sPath, 24)) color = paper;
-  if ((x - 379) ** 2 + (y - 137) ** 2 <= 30 ** 2) color = orange;
+  if ((x - 379) ** 2 + (y - 137) ** 2 <= 30 ** 2) color = highlight;
   return color;
 }
 
